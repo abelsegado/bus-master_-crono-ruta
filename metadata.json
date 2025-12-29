@@ -1,0 +1,5 @@
+{
+  "name": "Bus Master: Crono-Ruta",
+  "description": "Un juego pedagógico gamificado diseñado para memorizar el orden cronológico de las paradas de autobús. Incluye modos de ida y vuelta, retroalimentación inmediata y generación de rutas asistida por IA para un aprendizaje repetitivo y efectivo.",
+  "requestFramePermissions": []
+}
