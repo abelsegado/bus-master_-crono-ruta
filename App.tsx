@@ -931,7 +931,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Quick Access Grid */}
-            <div className="flex flex-wrap gap-2 justify-center px-2 py-2">
+            <div className="flex gap-2 px-2 py-4 overflow-x-auto custom-scrollbar pb-4 snap-x">
               {uniqueLines.map((line) => (
                 <button
                   key={line.id}
@@ -955,7 +955,7 @@ const App: React.FC = () => {
                     setToasts([]);
                     setTimeout(() => inputRef.current?.focus(), 50);
                   }}
-                  className={`w-10 h-10 rounded-xl font-black text-xs flex items-center justify-center transition-all bg-white shadow-sm border-2 ${
+                  className={`w-10 h-10 shrink-0 snap-center rounded-xl font-black text-xs flex items-center justify-center transition-all bg-white shadow-sm border-2 ${
                     selectedBaseId === line.id ? "border-indigo-600 text-indigo-600 ring-2 ring-indigo-100" : "border-slate-200 text-slate-400 hover:border-indigo-300 hover:text-indigo-500"
                   }`}
                 >
@@ -964,189 +964,7 @@ const App: React.FC = () => {
               ))}
             </div>
 
-            {/* The Stacking Visual Section */}
-            <div className="bg-white rounded-[2rem] shadow-2xl p-6 border-2 border-slate-200 overflow-hidden relative">
-              <div className="flex flex-col gap-6 mb-6">
-                {/* Header Info with Line Number and Controls */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-lg font-black uppercase tracking-wider">LÍNEA {selectedBaseId}</span>
-                      {/* Checkpoint Toggle */}
-                      {gameMode !== "study" && (
-                      <button
-                        onClick={() => setCheckpointEnabled(!checkpointEnabled)}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
-                          checkpointEnabled ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-slate-100 text-slate-400 border-slate-200"
-                        }`}
-                        title="Si activas checkpoint, no cuenta para el progreso difícil."
-                      >
-                        <Flag className="w-4 h-4" />
-                        Checkpoint
-                      </button>
-                      )}
-                    </div>
-                    <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter leading-none">{currentRoute.name}</h2>
-                  </div>
-
-                  {/* Direction Switch - Conditional */}
-                  {availableDirections.count > 1 && (
-                      <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                        <button
-                          onClick={() => {
-                            if (direction !== "ida") {
-                              const newDir = "ida";
-                              setDirection(newDir);
-                              // Manually reset game state for immediate effect without stale closures
-                              const targetId = `${selectedBaseId}-${newDir}`;
-                              const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
-                              const stops = route.stops;
-
-                              setSelectedStops([]);
-                              setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
-                              setGameStatus("playing");
-                              setShake(false);
-                              setMaxProgress(0);
-                              setCurrentFailures(0);
-                              setToasts([]);
-                              if (inputRef.current) inputRef.current.focus();
-                            }
-                          }}
-                          className={`p-2 rounded-lg transition-all ${direction === "ida" ? "bg-emerald-500 text-white shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
-                          title="Cambiar a Ida"
-                        >
-                          <ArrowUpCircle className="w-6 h-6" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (direction !== "vuelta") {
-                              const newDir = "vuelta";
-                              setDirection(newDir);
-                              // Manually reset game state
-                              const targetId = `${selectedBaseId}-${newDir}`;
-                              const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
-                              const stops = route.stops;
-
-                              setSelectedStops([]);
-                              setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
-                              setGameStatus("playing");
-                              setShake(false);
-                              setMaxProgress(0);
-                              setCurrentFailures(0);
-                              setToasts([]);
-                              if (inputRef.current) inputRef.current.focus();
-                            }
-                          }}
-                          className={`p-2 rounded-lg transition-all ${direction === "vuelta" ? "bg-orange-500 text-white shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
-                          title="Cambiar a Vuelta"
-                        >
-                          <ArrowDownCircle className="w-6 h-6" />
-                        </button>
-                      </div>
-                  )}
-                </div>
-
-                {/* Stats Bar */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                  <div>
-                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-1">
-                      <RefreshCw className="w-4 h-4 text-indigo-500 animate-spin-slow" /> Trayecto de {direction.toUpperCase()}
-                    </h3>
-                  </div>
-                  <div className="bg-slate-100 px-4 py-2 rounded-2xl font-black text-indigo-600 flex items-center gap-3 shadow-inner border border-slate-200">
-                    <span className="text-2xl tabular-nums">{selectedStops.length}</span>
-                    <div className="w-px h-6 bg-slate-300" />
-                    <span className="text-slate-400 tabular-nums">{targetOrder.length}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                className={`flex flex-wrap gap-2 items-center min-h-[90px] p-4 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 transition-all ${
-                  shake ? "shake border-rose-500 border-solid bg-rose-50" : ""
-                }`}
-              >
-                {selectedStops.length === 0 && (
-                  <div className="flex flex-col items-center justify-center w-full py-4 text-slate-400 animate-pulse">
-                    <MapPin className="w-8 h-8 mb-1 opacity-20" />
-                    <p className="font-black uppercase text-[10px] tracking-[0.3em]">Pulsa la parada de salida</p>
-                  </div>
-                )}
-                {selectedStops.map((stop, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      // Rewind to this stop (keep it and previous ones)
-                      const newSelected = selectedStops.slice(0, idx + 1);
-                      setSelectedStops(newSelected);
-
-                      // Restore available options: All stops that come AFTER this index
-                      // We reconstruct from targetOrder to ensure we get the correct IDs back
-                      const restoredOptions = targetOrder.map((name, i) => ({ id: `${i}-${name}`, name })).filter((_, i) => i > idx);
-
-                      setAvailableOptions(restoredOptions);
-
-                      // Clear feedback and shake to ensure clean state
-                      setToasts([]);
-                      setShake(false);
-                      // Focus input
-                      setTimeout(() => inputRef.current?.focus(), 50);
-                    }}
-                    className={`text-white pl-2 pr-4 py-2 rounded-xl font-bold text-xs shadow-md animate-in zoom-in-75 duration-300 flex items-center gap-2 border-b-2 group transition-all hover:scale-105 active:scale-95 text-left leading-tight ${
-                      direction === "ida" ? "bg-emerald-600 border-emerald-800 hover:bg-emerald-500" : "bg-orange-600 border-orange-800 hover:bg-orange-500"
-                    }`}
-                  >
-                    <span className="bg-white text-slate-800 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shadow-sm shrink-0">{idx + 1}</span>
-                    <span className="whitespace-normal">{stop}</span>
-                  </button>
-                ))}
-
-                {/* REWIND GHOST CARDS */}
-                {maxProgress > selectedStops.length && targetOrder.slice(selectedStops.length, maxProgress).map((stopName, i) => {
-                    const realIndex = selectedStops.length + i;
-                    return (
-                        <button
-                             key={`ghost-${realIndex}`}
-                             onClick={() => {
-                                 // Forward Rewind: Restore up to this ghost stop
-                                 const restoredStops = targetOrder.slice(0, realIndex + 1);
-                                 setSelectedStops(restoredStops);
-                                 
-                                 const restoredOptions = targetOrder.map((name, k) => ({ id: `${k}-${name}`, name })).filter((_, k) => k > realIndex);
-                                 setAvailableOptions(restoredOptions);
-                                 if (inputRef.current) inputRef.current.focus();
-                             }}
-                             className="opacity-50 hover:opacity-80 transition-opacity pl-2 pr-4 py-2 rounded-xl font-bold text-xs border-2 border-slate-300 bg-slate-100 flex items-center gap-2 text-slate-500 cursor-pointer"
-                        >
-                             <span className="bg-slate-300 text-slate-500 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0">{realIndex + 1}</span>
-                             <span className="whitespace-normal">{stopName}</span>
-                        </button>
-                    )
-                })}
-
-                {/* Ghost Hint for Study/Memorize Mode */}
-                {gameMode === "study" && selectedStops.length < targetOrder.length && (
-                  <div className="text-slate-400 pl-2 pr-3 py-2 rounded-xl font-bold text-xs border-dashed border-2 border-slate-300 flex items-center gap-2 opacity-60 animate-pulse">
-                    <span className="bg-slate-200 text-slate-500 w-5 h-5 flex items-center justify-center rounded text-[10px] font-black shrink-0">{selectedStops.length + 1}</span>
-                    <span className="truncate max-w-[150px]">{targetOrder[selectedStops.length]}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6">
-                <div className="bg-slate-100 h-4 rounded-full p-0.5 overflow-hidden border border-slate-200 shadow-inner">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ease-out shadow-lg ${
-                      selectedStops.length === targetOrder.length ? "bg-indigo-500" : direction === "ida" ? "bg-emerald-500" : "bg-orange-500"
-                    }`}
-                    style={{ width: `${(selectedStops.length / targetOrder.length) * 100}%` }}
-                  >
-                    <div className="w-full h-full bg-white/20 animate-pulse" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
+            {/* Game Status Sections (Moved Up) */}
             {gameStatus === "playing" && (
               <div className="space-y-4">
                 <div className="flex items-center justify-center gap-4">
@@ -1241,7 +1059,7 @@ const App: React.FC = () => {
                     {/* Denser grid and alphabetical order for faster pedagogical search */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                       {filteredOptions.length > 5 ? (
-                         <div className="col-span-full py-12 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-2">
+                         <div className="col-span-full py-2 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-2">
                            <Search className="w-8 h-8 opacity-20" />
                            <span>Escribe para filtrar las opciones ({filteredOptions.length} disponibles)...</span>
                            <span className="text-xs opacity-50">Sigue escribiendo hasta que queden 5 o menos.</span>
@@ -1250,24 +1068,17 @@ const App: React.FC = () => {
                         <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas con "{searchText}"</div>
                       ) : (
                         filteredOptions.map((option, idx) => {
-                          const isFirstMatch = searchText.length > 0 && idx === 0;
                           return (
                             <button
                               key={option.id}
                               type="button"
-                              tabIndex={isFirstMatch ? -1 : 0} // Skip tab focus for first match (Enter selects it)
                               onMouseDown={(e) => e.preventDefault()} // Prevent focus loss from input on mouse click, but allows Tab focus
                               onClick={() => handleStopClick(option)}
                               className={`p-3 rounded-2xl shadow-sm hover:shadow-lg transition-all active:scale-95 flex items-center justify-center text-center font-bold text-xs min-h-[60px] group relative overflow-hidden outline-none 
                           focus:ring-4 focus:ring-indigo-400 focus:scale-105 focus:z-20
-                          ${
-                            isFirstMatch
-                              ? "bg-indigo-50 border-4 border-indigo-500 text-indigo-700 ring-4 ring-indigo-200/50 scale-105 z-10"
-                              : "bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700"
-                          }`}
+                          bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700`}
                             >
                               <span className="relative z-10 group-hover:scale-105 transition-transform duration-200 line-clamp-2">{option.name}</span>
-                              {isFirstMatch && <div className="absolute right-1 top-1 w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />}
                             </button>
                           );
                         })
@@ -1320,6 +1131,190 @@ const App: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* The Stacking Visual Section (Moved Down) */}
+            <div className="bg-white rounded-[2rem] shadow-2xl p-6 border-2 border-slate-200 overflow-hidden relative">
+              
+              {/* Absolute Count - Top Right */}
+              <div className="absolute top-0 right-0 bg-slate-100 px-4 py-2 rounded-bl-2xl border-b border-l border-slate-200 font-black text-indigo-600 flex items-center gap-3 shadow-sm z-10">
+                <span className="text-xl tabular-nums">{selectedStops.length}</span>
+                <div className="w-px h-4 bg-slate-300" />
+                <span className="text-slate-400 tabular-nums">{targetOrder.length}</span>
+              </div>
+
+              <div className="flex flex-col gap-4 mb-6 pt-2">
+                {/* Header Info with Line Number and Tags */}
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 mb-2 pr-24">
+                    <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider">
+                      LÍNEA {selectedBaseId}
+                    </span>
+                    
+                    {/* Direction Tag */}
+                    <span className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-1 ${
+                        direction === "ida" ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-700"
+                    }`}>
+                        {direction === "ida" ? <ArrowUpCircle size={14} /> : <ArrowDownCircle size={14} />}
+                        {direction}
+                    </span>
+
+                    {/* Checkpoint Toggle */}
+                    {gameMode !== "study" && (
+                      <button
+                        onClick={() => setCheckpointEnabled(!checkpointEnabled)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
+                          checkpointEnabled ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-slate-100 text-slate-400 border-slate-200"
+                        }`}
+                        title="Si activas checkpoint, no cuenta para el progreso difícil."
+                      >
+                        <Flag className="w-3 h-3" />
+                        Checkpoint
+                      </button>
+                    )}
+                  </div>
+                  <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none pr-24">{currentRoute.name}</h2>
+                </div>
+
+                {/* Direction Switch - Conditional - Compact Row */}
+                {availableDirections.count > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (direction !== "ida") {
+                            const newDir = "ida";
+                            setDirection(newDir);
+                            const targetId = `${selectedBaseId}-${newDir}`;
+                            const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                            const stops = route.stops;
+                            setSelectedStops([]);
+                            setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
+                            setGameStatus("playing");
+                            setShake(false);
+                            setMaxProgress(0);
+                            setCurrentFailures(0);
+                            setToasts([]);
+                            if (inputRef.current) inputRef.current.focus();
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-wide flex items-center gap-1 ${
+                            direction === "ida" ? "bg-emerald-500 text-white shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        }`}
+                      >
+                        <ArrowUpCircle className="w-3 h-3" /> IDA
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (direction !== "vuelta") {
+                            const newDir = "vuelta";
+                            setDirection(newDir);
+                            const targetId = `${selectedBaseId}-${newDir}`;
+                            const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                            const stops = route.stops;
+                            setSelectedStops([]);
+                            setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
+                            setGameStatus("playing");
+                            setShake(false);
+                            setMaxProgress(0);
+                            setCurrentFailures(0);
+                            setToasts([]);
+                            if (inputRef.current) inputRef.current.focus();
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-wide flex items-center gap-1 ${
+                            direction === "vuelta" ? "bg-orange-500 text-white shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                        }`}
+                      >
+                        <ArrowDownCircle className="w-3 h-3" /> VUELTA
+                      </button>
+                    </div>
+                )}
+              </div>
+
+              <div
+                className={`flex flex-wrap gap-2 content-start items-start min-h-[90px] p-4 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 transition-all ${
+                  shake ? "shake border-rose-500 border-solid bg-rose-50" : ""
+                }`}
+              >
+                {selectedStops.length === 0 && (
+                  <div className="flex flex-col items-center justify-center w-full py-4 text-slate-400 animate-pulse">
+                    <MapPin className="w-8 h-8 mb-1 opacity-20" />
+                    <p className="font-black uppercase text-[10px] tracking-[0.3em]">Pulsa la parada de salida</p>
+                  </div>
+                )}
+                {selectedStops.map((stop, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      // Rewind to this stop (keep it and previous ones)
+                      const newSelected = selectedStops.slice(0, idx + 1);
+                      setSelectedStops(newSelected);
+
+                      // Restore available options: All stops that come AFTER this index
+                      // We reconstruct from targetOrder to ensure we get the correct IDs back
+                      const restoredOptions = targetOrder.map((name, i) => ({ id: `${i}-${name}`, name })).filter((_, i) => i > idx);
+
+                      setAvailableOptions(restoredOptions);
+
+                      // Clear feedback and shake to ensure clean state
+                      setToasts([]);
+                      setShake(false);
+                      // Focus input
+                      setTimeout(() => inputRef.current?.focus(), 50);
+                    }}
+                    className={`text-white pl-2 pr-4 py-2 rounded-xl font-bold text-xs shadow-md animate-in zoom-in-75 duration-300 flex items-center gap-2 border-b-2 group transition-all hover:scale-105 active:scale-95 text-left leading-tight ${
+                      direction === "ida" ? "bg-emerald-600 border-emerald-800 hover:bg-emerald-500" : "bg-orange-600 border-orange-800 hover:bg-orange-500"
+                    }`}
+                  >
+                    <span className="bg-white text-slate-800 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shadow-sm shrink-0">{idx + 1}</span>
+                    <span className="whitespace-normal">{stop}</span>
+                  </button>
+                ))}
+
+                {/* REWIND GHOST CARDS */}
+                {maxProgress > selectedStops.length && targetOrder.slice(selectedStops.length, maxProgress).map((stopName, i) => {
+                    const realIndex = selectedStops.length + i;
+                    return (
+                        <button
+                             key={`ghost-${realIndex}`}
+                             onClick={() => {
+                                 // Forward Rewind: Restore up to this ghost stop
+                                 const restoredStops = targetOrder.slice(0, realIndex + 1);
+                                 setSelectedStops(restoredStops);
+                                 
+                                 const restoredOptions = targetOrder.map((name, k) => ({ id: `${k}-${name}`, name })).filter((_, k) => k > realIndex);
+                                 setAvailableOptions(restoredOptions);
+                                 if (inputRef.current) inputRef.current.focus();
+                             }}
+                             className="opacity-50 hover:opacity-80 transition-opacity pl-2 pr-4 py-2 rounded-xl font-bold text-xs border-2 border-slate-300 bg-slate-100 flex items-center gap-2 text-slate-500 cursor-pointer"
+                        >
+                             <span className="bg-slate-300 text-slate-500 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0">{realIndex + 1}</span>
+                             <span className="whitespace-normal">{stopName}</span>
+                        </button>
+                    )
+                })}
+
+                {/* Ghost Hint for Study/Memorize Mode */}
+                {gameMode === "study" && selectedStops.length < targetOrder.length && (
+                  <div className="text-slate-400 pl-2 pr-3 py-2 rounded-xl font-bold text-xs border-dashed border-2 border-slate-300 flex items-center gap-2 opacity-60 animate-pulse">
+                    <span className="bg-slate-200 text-slate-500 w-5 h-5 flex items-center justify-center rounded text-[10px] font-black shrink-0">{selectedStops.length + 1}</span>
+                    <span className="truncate max-w-[150px]">{targetOrder[selectedStops.length]}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6">
+                <div className="bg-slate-100 h-4 rounded-full p-0.5 overflow-hidden border border-slate-200 shadow-inner">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ease-out shadow-lg ${
+                      selectedStops.length === targetOrder.length ? "bg-indigo-500" : direction === "ida" ? "bg-emerald-500" : "bg-orange-500"
+                    }`}
+                    style={{ width: `${(selectedStops.length / targetOrder.length) * 100}%` }}
+                  >
+                    <div className="w-full h-full bg-white/20 animate-pulse" />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
@@ -1351,6 +1346,7 @@ const App: React.FC = () => {
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 8px;
+          height: 8px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
           background: #f1f5f9;
