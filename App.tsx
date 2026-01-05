@@ -190,18 +190,31 @@ const App: React.FC = () => {
   };
 
   const currentRoute = useMemo(() => {
-    const targetId = `${selectedBaseId}-${direction}`;
-    return BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+    // Look for a route that matches both the base ID and the requested direction suffix
+    const match = BUS_ROUTES.find(r => {
+      const parts = r.id.split("-");
+      const base = parts[0];
+      const routeDirection = parts[parts.length - 1];
+      return base === selectedBaseId && routeDirection === direction;
+    });
+
+    if (match) return match;
+
+    // Fallback: look for ANY route with the same base ID (useful for circular routes)
+    return BUS_ROUTES.find(r => r.id.split("-")[0] === selectedBaseId) || BUS_ROUTES[0];
   }, [selectedBaseId, direction]);
 
   const targetOrder = useMemo(() => currentRoute.stops, [currentRoute]);
 
-  // Directions availability check
   const availableDirections = useMemo(() => {
-    const routes = BUS_ROUTES.filter(r => r.id.startsWith(selectedBaseId));
-    const hasIda = routes.some(r => r.id.includes("ida"));
-    const hasVuelta = routes.some(r => r.id.includes("vuelta"));
-    return { hasIda, hasVuelta, count: routes.length };
+    const routes = BUS_ROUTES.filter(r => r.id.split("-")[0] === selectedBaseId);
+    const hasIda = routes.some(r => r.id.endsWith("-ida"));
+    const hasVuelta = routes.some(r => r.id.endsWith("-vuelta"));
+    // A route is effectively ida/vuelta if it has those suffixes OR if it's the only route for that base (like circular)
+    const canDoIda = hasIda || routes.length === 1;
+    const canDoVuelta = hasVuelta || routes.length === 1;
+    
+    return { hasIda: canDoIda, hasVuelta: canDoVuelta, count: routes.length };
   }, [selectedBaseId]);
 
   // Options sorted alphabetically for pedagogical speed finding
@@ -285,9 +298,15 @@ const App: React.FC = () => {
       inputRef.current?.focus();
 
       if (difficulty === "hard") {
-          // Hard Mode: Go back 3 stops
-          setTimeout(() => {
-            setShake(false);
+        setTimeout(() => {
+          setShake(false);
+          
+          if (gameMode === "standard") {
+            // Practice Hard Mode: Reset to beginning
+            setSelectedStops([]);
+            setAvailableOptions(targetOrder.map((name, i) => ({ id: `${i}-${name}`, name })));
+          } else {
+             // Other Hard Modes (shouldn't be reached in Study, but safe fallback): Go back 3 stops
             const backSteps = 3;
             const newIndex = Math.max(0, selectedStops.length - backSteps);
             
@@ -297,8 +316,10 @@ const App: React.FC = () => {
                 const restoredOptions = targetOrder.map((name, i) => ({ id: `${i}-${name}`, name })).filter((_, i) => i >= newIndex);
                 setAvailableOptions(restoredOptions);
             }
-            if (inputRef.current) inputRef.current.focus();
-          }, 500);
+          }
+          
+          if (inputRef.current) inputRef.current.focus();
+        }, 500);
       } else {
         setTimeout(() => setShake(false), 500);
       }
@@ -1057,33 +1078,49 @@ const App: React.FC = () => {
                     </form>
 
                     {/* Denser grid and alphabetical order for faster pedagogical search */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                      {filteredOptions.length > 5 ? (
-                         <div className="col-span-full py-2 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-2">
-                           <Search className="w-8 h-8 opacity-20" />
-                           <span>Escribe para filtrar las opciones ({filteredOptions.length} disponibles)...</span>
-                           <span className="text-xs opacity-50">Sigue escribiendo hasta que queden 5 o menos.</span>
-                         </div>
-                      ) : filteredOptions.length === 0 ? (
-                        <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas con "{searchText}"</div>
-                      ) : (
-                        filteredOptions.map((option, idx) => {
-                          return (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()} // Prevent focus loss from input on mouse click, but allows Tab focus
-                              onClick={() => handleStopClick(option)}
-                              className={`p-3 rounded-2xl shadow-sm hover:shadow-lg transition-all active:scale-95 flex items-center justify-center text-center font-bold text-xs min-h-[60px] group relative overflow-hidden outline-none 
-                          focus:ring-4 focus:ring-indigo-400 focus:scale-105 focus:z-20
-                          bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700`}
-                            >
-                              <span className="relative z-10 group-hover:scale-105 transition-transform duration-200 line-clamp-2">{option.name}</span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
+                    {/* Display cards grid: Always in standard mode, OR in study mode only when searching */}
+                    {(gameMode === "standard" || (gameMode === "study" && searchText)) && (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                        {gameMode === "standard" && filteredOptions.length > 3 ? (
+                          <div className="col-span-full py-2 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-2">
+                            <Search className="w-8 h-8 opacity-20" />
+                            <span>Escribe para filtrar las opciones ({filteredOptions.length} disponibles)...</span>
+                            <span className="text-xs opacity-50">Sigue escribiendo hasta que queden 3 o menos.</span>
+                          </div>
+                        ) : (availableOptions.length <= 3 && searchText.length < 3) ? (
+                          <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-2">
+                            <Search className="w-8 h-8 opacity-20" />
+                            <span>Escribe al menos 3 letras para ver las últimas {availableOptions.length} paradas...</span>
+                          </div>
+                        ) : filteredOptions.length === 0 ? (
+                          <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas {searchText ? `con "${searchText}"` : ""}</div>
+                        ) : (
+                          filteredOptions.map((option, idx) => {
+                            const isSingleMatch = filteredOptions.length === 1;
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()} // Prevent focus loss from input on mouse click, but allows Tab focus
+                                onClick={() => handleStopClick(option)}
+                                className={`p-3 rounded-2xl shadow-sm hover:shadow-lg transition-all active:scale-95 flex items-center justify-center text-center font-bold text-xs min-h-[60px] group relative overflow-hidden outline-none 
+                            focus:ring-4 focus:ring-indigo-400 focus:scale-105 focus:z-20
+                            ${isSingleMatch 
+                                ? "bg-emerald-500 text-white border-emerald-600" 
+                                : gameMode === "study" 
+                                ? "bg-sky-50 border-sky-100 text-sky-800 hover:bg-sky-600 hover:text-white" 
+                                : "bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700"}`}
+                              >
+                                <span className="relative z-10 group-hover:scale-105 transition-transform duration-200 line-clamp-2 flex items-center gap-2">
+                                  {option.name}
+                                  {isSingleMatch && <ChevronRight className="w-4 h-4" />}
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -1293,13 +1330,22 @@ const App: React.FC = () => {
                     )
                 })}
 
-                {/* Ghost Hint for Study/Memorize Mode */}
-                {gameMode === "study" && selectedStops.length < targetOrder.length && (
-                  <div className="text-slate-400 pl-2 pr-3 py-2 rounded-xl font-bold text-xs border-dashed border-2 border-slate-300 flex items-center gap-2 opacity-60 animate-pulse">
-                    <span className="bg-slate-200 text-slate-500 w-5 h-5 flex items-center justify-center rounded text-[10px] font-black shrink-0">{selectedStops.length + 1}</span>
-                    <span className="truncate max-w-[150px]">{targetOrder[selectedStops.length]}</span>
-                  </div>
-                )}
+                {/* Ghost Hint for Study/Memorize Mode - Interactivo e Integral */}
+                {gameMode === "study" && targetOrder.slice(selectedStops.length).map((stopName, i) => {
+                  const realIndex = selectedStops.length + i;
+                  return (
+                    <button
+                      key={`future-ghost-${realIndex}`}
+                      onClick={() => {
+                        handleStopClick({ id: `${realIndex}-${stopName}`, name: stopName });
+                      }}
+                      className="group appearance-none bg-sky-50/50 hover:bg-sky-100 text-sky-700/60 hover:text-sky-700 pl-2 pr-4 py-2 rounded-xl font-bold text-xs border-2 border-sky-100 hover:border-sky-400 flex items-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95 outline-none focus:ring-2 focus:ring-sky-300"
+                    >
+                      <span className="bg-white/80 text-sky-500 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0 shadow-sm group-hover:scale-110 transition-transform">{realIndex + 1}</span>
+                      <span className="whitespace-normal text-left">{stopName}</span>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="mt-6">
