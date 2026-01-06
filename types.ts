@@ -23,6 +23,6 @@ export interface GameState {
   streak: number;
 }
 
-export type GameDifficulty = 'normal' | 'hard';
+export type GameDifficulty = 'normal' | 'hard' | 'study';
 
 export type GameMode = 'standard' | 'study';

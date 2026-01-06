@@ -26,6 +26,7 @@ import {
   ToggleLeft,
   ToggleRight,
   AlertTriangle,
+  Crown,
 } from "lucide-react";
 import { GameDirection, RouteData, GameStatus, GameDifficulty, GameMode } from "./types";
 
@@ -90,6 +91,11 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : {};
   });
 
+  const [crowns, setCrowns] = useState<Record<string, number>>(() => {
+    const saved = localStorage.getItem("bus_master_crowns");
+    return saved ? JSON.parse(saved) : {};
+  });
+
   // Load and manage unique lines with persistent order
   const [uniqueLines, setUniqueLines] = useState<{ id: string; name: string }[]>([]);
 
@@ -140,6 +146,10 @@ const App: React.FC = () => {
     localStorage.setItem("bus_master_attempts", JSON.stringify(routeAttempts));
   }, [routeAttempts]);
 
+  useEffect(() => {
+    localStorage.setItem("bus_master_crowns", JSON.stringify(crowns));
+  }, [crowns]);
+
   const markCompleted = (routeId: string) => {
     setCompletedRoutes((prev) => {
       if (prev.includes(routeId)) return prev;
@@ -152,6 +162,13 @@ const App: React.FC = () => {
     setFailedRoutes((prev) => ({
         ...prev,
         [routeId]: (prev[routeId] || 0) + count
+    }));
+  };
+
+  const recordCrown = (routeId: string) => {
+    setCrowns((prev) => ({
+      ...prev,
+      [routeId]: (prev[routeId] || 0) + 1
     }));
   };
 
@@ -284,6 +301,10 @@ const App: React.FC = () => {
         if (gameMode !== "study") {
              if (difficulty === "hard" && !checkpointEnabled) {
                markCompleted(currentRoute.id);
+               // Award crown if zero failures
+               if (currentFailures === 0) {
+                 recordCrown(currentRoute.id);
+               }
              }
              recordFailures(currentRoute.id, currentFailures);
         }
@@ -334,13 +355,15 @@ const App: React.FC = () => {
   };
 
   const resetProgress = () => {
-    if (window.confirm("¿Estás seguro de que quieres borrar el progreso de completadas?")) {
+    if (window.confirm("¿Estás seguro de que quieres borrar el progreso de completadas y coronas?")) {
       setCompletedRoutes([]);
       setFailedRoutes({});
       setRouteAttempts({});
+      setCrowns({});
       localStorage.removeItem("bus_master_completed_hard");
       localStorage.removeItem("bus_master_failures");
       localStorage.removeItem("bus_master_attempts");
+      localStorage.removeItem("bus_master_crowns");
     }
   };
 
@@ -362,28 +385,13 @@ const App: React.FC = () => {
             setGameStatus("setup");
             setGameMode("standard");
           }}
-          className="group bg-white p-4 rounded-[2rem] border-2 border-slate-200 shadow-xl hover:border-indigo-600 hover:shadow-2xl transition-all flex flex-col items-center gap-3 active:scale-95 py-8"
+          className="col-span-2 group bg-white p-4 rounded-[2rem] border-2 border-slate-200 shadow-xl hover:border-indigo-600 hover:shadow-2xl transition-all flex flex-col items-center gap-3 active:scale-95 py-8"
         >
           <div className="bg-emerald-100 p-4 rounded-2xl text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
             <Play className="w-8 h-8 fill-current" />
           </div>
           <span className="font-black text-lg uppercase tracking-tighter text-center">Pon en práctica</span>
           <p className="text-slate-400 font-bold text-[10px] text-center hidden sm:block">Entrena tu memoria y domina las rutas.</p>
-        </button>
-
-        <button
-          onClick={() => {
-            setScreen("setup");
-            setGameStatus("setup");
-            setGameMode("study");
-          }}
-          className="group bg-white p-4 rounded-[2rem] border-2 border-slate-200 shadow-xl hover:border-sky-600 hover:shadow-2xl transition-all flex flex-col items-center gap-3 active:scale-95 py-8"
-        >
-          <div className="bg-sky-100 p-4 rounded-2xl text-sky-600 group-hover:bg-sky-600 group-hover:text-white transition-colors">
-            <Brain className="w-8 h-8" />
-          </div>
-          <span className="font-black text-lg uppercase tracking-tighter text-center">Memoriza</span>
-          <p className="text-slate-400 font-bold text-[10px] text-center hidden sm:block">Visualiza la siguiente parada.</p>
         </button>
 
         <button
@@ -448,21 +456,20 @@ const App: React.FC = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
           {uniqueLines.map((line) => {
-            const idaId = `${line.id}-ida`;
-            const vueltaId = `${line.id}-vuelta`;
-            // Check if these specific routes actually exist in BUS_ROUTES data (some lines might be circular-only? assuming ida/vuelta standard)
-            const hasIda = BUS_ROUTES.some((r) => r.id === idaId);
-            const hasVuelta = BUS_ROUTES.some((r) => r.id === vueltaId);
+            // Find all route segments belonging to this base line ID
+            const lineSegments = BUS_ROUTES.filter(r => r.id.split("-")[0] === line.id);
+            
+            const doneCount = lineSegments.reduce((acc, r) => {
+              return acc + (completedRoutes.includes(r.id) ? 1 : 0);
+            }, 0);
 
-            const isIdaDone = completedRoutes.includes(idaId);
-            const isVueltaDone = completedRoutes.includes(vueltaId);
-
-            const segmentsCount = (hasIda ? 1 : 0) + (hasVuelta ? 1 : 0);
-            const doneCount = (isIdaDone ? 1 : 0) + (isVueltaDone ? 1 : 0);
+            const segmentsCount = lineSegments.length;
 
             let status: "complete" | "partial" | "none" = "none";
             if (doneCount === segmentsCount && segmentsCount > 0) status = "complete";
             else if (doneCount > 0) status = "partial";
+
+            const lineCrowns = lineSegments.reduce((sum, r) => sum + (crowns[r.id] || 0), 0);
 
             return (
               <div
@@ -481,23 +488,37 @@ const App: React.FC = () => {
                       Línea {line.id}
                     </span>
                     {status === "complete" && <CheckCircle className="w-4 h-4 text-emerald-500" />}
+                    {lineCrowns > 0 && (
+                      <div className="flex items-center gap-1 bg-amber-50 text-amber-600 px-2 py-0.5 rounded-lg border border-amber-100 shadow-sm animate-in zoom-in-50">
+                        <Crown className="w-3 h-3 fill-amber-400" />
+                        <span className="text-[10px] font-black">{lineCrowns}</span>
+                      </div>
+                    )}
                   </div>
                   <h4 className="font-black text-slate-700 text-lg leading-tight mb-2">{line.name}</h4>
 
                   {/* Mini Status Bars */}
                   <div className="flex gap-1">
-                    {hasIda && <div className={`h-1.5 w-8 rounded-full ${isIdaDone ? "bg-emerald-500" : "bg-slate-200"}`} title="Ida" />}
-                    {hasVuelta && <div className={`h-1.5 w-8 rounded-full ${isVueltaDone ? "bg-emerald-500" : "bg-slate-200"}`} title="Vuelta" />}
+                    {lineSegments.map(segment => (
+                      <div 
+                        key={segment.id}
+                        className={`h-1.5 w-8 rounded-full ${completedRoutes.includes(segment.id) ? "bg-emerald-500" : "bg-slate-200"}`} 
+                        title={segment.id.split('-').slice(1).join('-')} 
+                      />
+                    ))}
                   </div>
                 </div>
 
                 <button
                   onClick={() => {
                     if (status === "complete") return; // Nothing to do
-                    // Priorities: Missing Vuelta > Missing Ida > Default Ida
-                    let nextDir: GameDirection = "ida";
-                    if (hasIda && !isIdaDone) nextDir = "ida";
-                    else if (hasVuelta && !isVueltaDone) nextDir = "vuelta";
+                    
+                    // Pick the first incomplete segment
+                    const nextSegment = lineSegments.find(s => !completedRoutes.includes(s.id)) || lineSegments[0];
+                    const suffix = nextSegment.id.split('-').slice(1).join('-');
+                    
+                    // Map suffix to direction if possible, otherwise default to ida
+                    const nextDir: GameDirection = (suffix === "vuelta") ? "vuelta" : "ida";
 
                     setSelectedBaseId(line.id);
                     setDirection(nextDir);
@@ -705,28 +726,44 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {gameMode !== "study" && (
-            <div className="mb-6 flex gap-3">
-              <button
-                onClick={() => setDifficulty("normal")}
-                className={`flex-1 py-3 px-2 rounded-xl border-2 font-black uppercase text-[10px] tracking-wider transition-all flex flex-col items-center gap-1 ${
-                  difficulty === "normal" ? "bg-indigo-50 border-indigo-500 text-indigo-700" : "bg-white border-slate-200 text-slate-400 hover:border-indigo-200"
-                }`}
-              >
-                <span>Normal</span>
-                <span className="text-[8px] opacity-70 normal-case">Permite fallos</span>
-              </button>
-              <button
-                onClick={() => setDifficulty("hard")}
-                className={`flex-1 py-3 px-2 rounded-xl border-2 font-black uppercase text-[10px] tracking-wider transition-all flex flex-col items-center gap-1 ${
-                  difficulty === "hard" ? "bg-rose-50 border-rose-500 text-rose-700" : "bg-white border-slate-200 text-slate-400 hover:border-rose-200"
-                }`}
-              >
-                <span>Difícil</span>
-                <span className="text-[8px] opacity-70 normal-case">Un fallo y reinicias</span>
-              </button>
-            </div>
-          )}
+          <div className="mb-6 flex gap-3">
+            <button
+              onClick={() => {
+                setDifficulty("normal");
+                setGameMode("standard");
+              }}
+              className={`flex-1 py-3 px-2 rounded-xl border-2 font-black uppercase text-[10px] tracking-wider transition-all flex flex-col items-center gap-1 ${
+                difficulty === "normal" ? "bg-indigo-50 border-indigo-500 text-indigo-700" : "bg-white border-slate-200 text-slate-400 hover:border-indigo-200"
+              }`}
+            >
+              <span>Normal</span>
+              <span className="text-[8px] opacity-70 normal-case">Permite fallos</span>
+            </button>
+            <button
+              onClick={() => {
+                setDifficulty("hard");
+                setGameMode("standard");
+              }}
+              className={`flex-1 py-3 px-2 rounded-xl border-2 font-black uppercase text-[10px] tracking-wider transition-all flex flex-col items-center gap-1 ${
+                difficulty === "hard" ? "bg-rose-50 border-rose-500 text-rose-700" : "bg-white border-slate-200 text-slate-400 hover:border-rose-200"
+              }`}
+            >
+              <span>Difícil</span>
+              <span className="text-[8px] opacity-70 normal-case">Un fallo y reinicias</span>
+            </button>
+            <button
+              onClick={() => {
+                setDifficulty("study");
+                setGameMode("study");
+              }}
+              className={`flex-1 py-3 px-2 rounded-xl border-2 font-black uppercase text-[10px] tracking-wider transition-all flex flex-col items-center gap-1 ${
+                difficulty === "study" ? "bg-sky-50 border-sky-500 text-sky-700" : "bg-white border-slate-200 text-slate-400 hover:border-sky-200"
+              }`}
+            >
+              <span>Memoria</span>
+              <span className="text-[8px] opacity-70 normal-case">Ves siguiente parada</span>
+            </button>
+          </div>
 
           <button
             onClick={startNewGame}
@@ -831,7 +868,7 @@ const App: React.FC = () => {
               <h1 className="text-2xl font-black uppercase tracking-tighter text-white leading-none">Bus Master</h1>
               <p className="text-xs font-bold text-indigo-200 opacity-80 uppercase tracking-widest mt-1">
 
-                {screen === "home" ? "Escuela de Conductores Profesional" : screen === "failures" ? "PROGRESO" : screen === "errors" ? "ERRORES" : gameMode === "study" ? "MEMORIZA" : "PON EN PRÁCTICA"}
+                {screen === "home" ? "Escuela de Conductores Profesional" : screen === "failures" ? "PROGRESO" : screen === "errors" ? "ERRORES" : "PON EN PRÁCTICA"}
               </p>
             </div>
           </div>
@@ -858,8 +895,8 @@ const App: React.FC = () => {
 
         {/* Subheader */}
         {screen !== "home" && (
-          <div className="mt-6 -mx-6 -mb-6 py-3 px-6 flex justify-center shadow-inner bg-indigo-900 overflow-x-auto">
-            <div className="flex gap-2 min-w-max">
+          <div className="mt-6 -mx-6 -mb-6 py-3 px-6 flex shadow-inner bg-indigo-900 overflow-x-auto">
+            <div className="flex gap-2 min-w-max mx-auto">
               <button
                 onClick={() => {
                   setScreen("setup");
@@ -867,29 +904,13 @@ const App: React.FC = () => {
                   setGameStatus("setup");
                 }}
                 className={`px-4 py-2 rounded-xl flex items-center gap-2 text-xs font-black uppercase tracking-wider transition-all ${
-                  screen === "setup" && gameMode === "standard" || screen === "playing" && gameMode === "standard"
+                  (screen === "setup" || screen === "playing")
                     ? "bg-emerald-500 text-white shadow-lg scale-105"
                     : "bg-indigo-800 text-indigo-300 hover:bg-indigo-700 hover:text-white"
                 }`}
               >
                 <Play className="w-4 h-4 fill-current" />
                 Práctica
-              </button>
-
-              <button
-                onClick={() => {
-                  setScreen("setup");
-                  setGameMode("study");
-                  setGameStatus("setup");
-                }}
-                className={`px-4 py-2 rounded-xl flex items-center gap-2 text-xs font-black uppercase tracking-wider transition-all ${
-                  screen === "setup" && gameMode === "study" || screen === "playing" && gameMode === "study"
-                    ? "bg-sky-500 text-white shadow-lg scale-105"
-                    : "bg-indigo-800 text-indigo-300 hover:bg-indigo-700 hover:text-white"
-                }`}
-              >
-                <Brain className="w-4 h-4" />
-                Memoriza
               </button>
 
               <button
@@ -1079,45 +1100,46 @@ const App: React.FC = () => {
 
                     {/* Denser grid and alphabetical order for faster pedagogical search */}
                     {/* Display cards grid: Always in standard mode, OR in study mode only when searching */}
-                    {(gameMode === "standard" || (gameMode === "study" && searchText)) && (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                        {gameMode === "standard" && filteredOptions.length > 3 ? (
-                          <div className="col-span-full py-2 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-2">
-                            <Search className="w-8 h-8 opacity-20" />
-                            <span>Escribe para filtrar las opciones ({filteredOptions.length} disponibles)...</span>
-                            <span className="text-xs opacity-50">Sigue escribiendo hasta que queden 3 o menos.</span>
+                    {searchText && (gameMode === "standard" || gameMode === "study") && (
+                      <div className="flex flex-col gap-6">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                          {filteredOptions.length === 0 ? (
+                            <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas {searchText ? `con "${searchText}"` : ""}</div>
+                          ) : (
+                            filteredOptions.slice(0, 3).map((option) => {
+                              const isSingleMatch = filteredOptions.length === 1;
+                              return (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()} // Prevent focus loss from input on mouse click, but allows Tab focus
+                                  onClick={() => handleStopClick(option)}
+                                  className={`p-3 rounded-2xl shadow-sm hover:shadow-lg transition-all active:scale-95 flex items-center justify-center text-center font-bold text-xs min-h-[60px] group relative overflow-hidden outline-none 
+                              focus:ring-4 focus:ring-indigo-400 focus:scale-105 focus:z-20
+                              ${isSingleMatch 
+                                  ? "bg-emerald-500 text-white border-emerald-600" 
+                                  : gameMode === "study" 
+                                  ? "bg-sky-50 border-sky-100 text-sky-800 hover:bg-sky-600 hover:text-white" 
+                                  : "bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700"}`}
+                                >
+                                  <span className="relative z-10 group-hover:scale-105 transition-transform duration-200 line-clamp-2 flex items-center gap-2">
+                                    {option.name}
+                                    {isSingleMatch && <ChevronRight className="w-4 h-4" />}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {filteredOptions.length > 3 && (
+                          <div className="col-span-full py-2 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-1">
+                            <div className="flex items-center gap-2 text-sm justify-center">
+                              <Search className="w-4 h-4 opacity-40" />
+                              <span>Hay {filteredOptions.length} paradas disponibles</span>
+                            </div>
+                            <span className="text-[10px] opacity-60">Mostrando las 3 primeras. Sigue escribiendo para filtrar más.</span>
                           </div>
-                        ) : (availableOptions.length <= 3 && searchText.length < 3) ? (
-                          <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-2">
-                            <Search className="w-8 h-8 opacity-20" />
-                            <span>Escribe al menos 3 letras para ver las últimas {availableOptions.length} paradas...</span>
-                          </div>
-                        ) : filteredOptions.length === 0 ? (
-                          <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas {searchText ? `con "${searchText}"` : ""}</div>
-                        ) : (
-                          filteredOptions.map((option, idx) => {
-                            const isSingleMatch = filteredOptions.length === 1;
-                            return (
-                              <button
-                                key={option.id}
-                                type="button"
-                                onMouseDown={(e) => e.preventDefault()} // Prevent focus loss from input on mouse click, but allows Tab focus
-                                onClick={() => handleStopClick(option)}
-                                className={`p-3 rounded-2xl shadow-sm hover:shadow-lg transition-all active:scale-95 flex items-center justify-center text-center font-bold text-xs min-h-[60px] group relative overflow-hidden outline-none 
-                            focus:ring-4 focus:ring-indigo-400 focus:scale-105 focus:z-20
-                            ${isSingleMatch 
-                                ? "bg-emerald-500 text-white border-emerald-600" 
-                                : gameMode === "study" 
-                                ? "bg-sky-50 border-sky-100 text-sky-800 hover:bg-sky-600 hover:text-white" 
-                                : "bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700"}`}
-                              >
-                                <span className="relative z-10 group-hover:scale-105 transition-transform duration-200 line-clamp-2 flex items-center gap-2">
-                                  {option.name}
-                                  {isSingleMatch && <ChevronRight className="w-4 h-4" />}
-                                </span>
-                              </button>
-                            );
-                          })
                         )}
                       </div>
                     )}
@@ -1165,6 +1187,26 @@ const App: React.FC = () => {
                 <div className="flex items-center justify-center gap-4 bg-rose-900/40 py-4 px-8 rounded-2xl w-max mx-auto animate-pulse border border-white/10">
                   <RotateCcw className="w-5 h-5 animate-spin" />
                   <span className="font-black uppercase tracking-[0.2em] text-xs">Volviendo al inicio...</span>
+                </div>
+              </div>
+            )}
+
+            {gameStatus === "playing" && selectedStops.length > 0 && (
+              <div className="max-w-md mx-auto mb-6 px-4 animate-in fade-in slide-in-from-top duration-700">
+                <div className="flex items-center gap-4 px-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-slate-200 border border-slate-300 shadow-inner" />
+                  <div className="flex-1 h-0.5 bg-slate-100 relative flex items-center justify-center">
+                    <div className="absolute bg-white px-5 py-2.5 rounded-[1.25rem] border-2 border-slate-100 shadow-lg flex items-center gap-3 min-w-max">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-inner ${direction === "ida" ? "bg-emerald-100 text-emerald-600" : "bg-orange-100 text-orange-600"}`}>
+                        <MapPin className="w-4 h-4" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">Última Parada</span>
+                        <span className="text-xs font-black text-slate-700 uppercase leading-none">{selectedStops[selectedStops.length - 1]}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-slate-200 border border-slate-300 shadow-inner" />
                 </div>
               </div>
             )}
@@ -1331,7 +1373,7 @@ const App: React.FC = () => {
                 })}
 
                 {/* Ghost Hint for Study/Memorize Mode - Interactivo e Integral */}
-                {gameMode === "study" && targetOrder.slice(selectedStops.length).map((stopName, i) => {
+                {gameMode === "study" && targetOrder.slice(selectedStops.length, selectedStops.length + 1).map((stopName, i) => {
                   const realIndex = selectedStops.length + i;
                   return (
                     <button
