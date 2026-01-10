@@ -27,10 +27,16 @@ import {
   ToggleRight,
   AlertTriangle,
   Crown,
+  LogOut,
+  Mail,
+  LogIn,
+  User,
 } from "lucide-react";
 import { GameDirection, RouteData, GameStatus, GameDifficulty, GameMode } from "./types";
 
 import { BUS_ROUTES } from "./routes";
+import { supabase } from "./src/lib/supabase";
+
 
 const normalizeText = (text: string) => {
   return text
@@ -40,7 +46,8 @@ const normalizeText = (text: string) => {
     .replace(/\b(avenida|avda|av\.?)\b/g, "av"); // Normalize abbreviations
 };
 
-type Screen = "home" | "setup" | "playing" | "failures" | "errors";
+type Screen = "home" | "setup" | "playing" | "failures" | "errors" | "auth";
+
 
 interface Toast {
   id: string;
@@ -49,13 +56,82 @@ interface Toast {
 }
 
 const App: React.FC = () => {
+  const [direction, setDirection] = useState<GameDirection>("ida");
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+
+  // Supabase User Identity
+  const [userId, setUserId] = useState<string>(() => {
+    return localStorage.getItem("bus_master_user_id") || crypto.randomUUID();
+  });
+
+  useEffect(() => {
+    if (!localStorage.getItem("bus_master_user_id")) {
+      localStorage.setItem("bus_master_user_id", userId);
+    }
+  }, [userId]);
+
+  // Auth Subscription
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) setUserId(session.user.id);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user) setUserId(session.user.id);
+      else {
+        // Handle logout: Reset to local ID
+        const localId = localStorage.getItem("bus_master_user_id") || crypto.randomUUID();
+        setUserId(localId);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin }
+    });
+    if (error) alert(error.message);
+  };
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmail,
+      password: authPassword,
+    });
+    if (error) {
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: authEmail,
+        password: authPassword,
+      });
+      if (signUpError) alert(signUpError.message);
+      else alert("¡Revisa tu correo para confirmar tu cuenta!");
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setScreen("home");
+  };
+
   // Navigation
   const [screen, setScreen] = useState<Screen>("home");
+
+
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   // Selection
   const [selectedBaseId, setSelectedBaseId] = useState<string>("1");
-  const [direction, setDirection] = useState<GameDirection>("ida");
+
 
   // Game Logic
   const [selectedStops, setSelectedStops] = useState<string[]>([]);
@@ -149,6 +225,69 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("bus_master_crowns", JSON.stringify(crowns));
   }, [crowns]);
+
+  // Cloud Sync Logic
+  const loadOnlineProgress = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_progress')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (data && !error) {
+        if (data.completed_routes) setCompletedRoutes(data.completed_routes);
+        if (data.failed_routes) setFailedRoutes(data.failed_routes);
+        if (data.route_attempts) setRouteAttempts(data.route_attempts);
+        if (data.crowns) setCrowns(data.crowns);
+        if (data.line_order && data.line_order.length > 0) {
+          // Update uniqueLines if order is stored
+          const linesMap = new Map<string, string>();
+          BUS_ROUTES.forEach((r) => {
+            const baseId = r.id.split("-")[0];
+            if (!linesMap.has(baseId)) linesMap.set(baseId, r.name);
+          });
+          const baseList = Array.from(linesMap.entries()).map(([id, name]) => ({ id, name }));
+          baseList.sort((a, b) => data.line_order.indexOf(a.id) - data.line_order.indexOf(b.id));
+          setUniqueLines(baseList);
+        }
+      }
+    } catch (e) {
+      console.error("Error loading progress from Supabase:", e);
+    }
+  }, [userId]);
+
+  const saveOnlineProgress = useCallback(async () => {
+    try {
+      await supabase
+        .from('user_progress')
+        .upsert({
+          user_id: userId,
+          completed_routes: completedRoutes,
+          failed_routes: failedRoutes,
+          route_attempts: routeAttempts,
+          crowns: crowns,
+          line_order: uniqueLines.map(l => l.id),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+    } catch (e) {
+      console.error("Error saving progress to Supabase:", e);
+    }
+  }, [userId, completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines]);
+
+  // Initial load from cloud
+  useEffect(() => {
+    loadOnlineProgress();
+  }, [loadOnlineProgress]);
+
+  // Auto-sync to cloud when local data changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveOnlineProgress();
+    }, 3000); // 3 second debounce
+    return () => clearTimeout(timer);
+  }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, saveOnlineProgress]);
+
 
   const markCompleted = (routeId: string) => {
     setCompletedRoutes((prev) => {
@@ -378,7 +517,30 @@ const App: React.FC = () => {
         <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-xs">Escuela de Conductores Profesional</p>
       </div>
 
+      <div className="flex items-center gap-2 mb-2">
+        {session ? (
+          <button 
+            onClick={() => setScreen("auth")}
+            className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-2xl hover:bg-slate-200 transition-all"
+          >
+            <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold">
+              {session.user.email?.charAt(0).toUpperCase()}
+            </div>
+            <span className="text-xs font-bold text-slate-600 truncate max-w-[120px]">{session.user.email}</span>
+          </button>
+        ) : (
+          <button 
+            onClick={() => setScreen("auth")}
+            className="flex items-center gap-2 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-2xl hover:bg-indigo-100 transition-all border border-indigo-100"
+          >
+            <LogIn className="w-4 h-4" />
+            <span className="text-xs font-black uppercase tracking-wider">Iniciar Sesión</span>
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-4 w-full max-w-2xl">
+
         <button
           onClick={() => {
             setScreen("setup");
@@ -618,7 +780,96 @@ const App: React.FC = () => {
       )
   };
 
+  const renderAuth = () => (
+    <div className="max-w-md mx-auto py-12 px-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="bg-white rounded-[3rem] shadow-2xl p-8 border-2 border-slate-100">
+        <button onClick={() => setScreen("home")} className="mb-8 p-3 rounded-2xl bg-slate-50 text-slate-400 hover:text-slate-600 transition-all">
+          <ChevronLeft className="w-6 h-6" />
+        </button>
+
+        {session ? (
+          <div className="text-center space-y-6">
+            <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto">
+              <User className="w-10 h-10" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Tu Perfil</h2>
+              <p className="text-slate-500 font-medium">{session.user.email}</p>
+            </div>
+            <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider">
+              Tu progreso se está sincronizando en la nube ✨
+            </div>
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center justify-center gap-3 py-4 bg-rose-50 text-rose-600 rounded-2xl font-black uppercase text-sm tracking-widest hover:bg-rose-100 transition-all"
+            >
+              <LogOut className="w-5 h-5" /> Cerrar Sesión
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            <div className="text-center">
+              <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter">Bienvenido</h2>
+              <p className="text-slate-400 font-bold text-xs uppercase tracking-[0.2em] mt-2">Guarda tu progreso en la nube</p>
+            </div>
+
+            <button
+              onClick={handleGoogleLogin}
+              className="w-full flex items-center justify-center gap-4 py-4 bg-white border-2 border-slate-200 rounded-2xl font-black uppercase text-sm tracking-widest hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-sm"
+            >
+              <svg className="w-6 h-6" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Google
+            </button>
+
+            <div className="relative flex items-center">
+              <div className="flex-grow border-t border-slate-200"></div>
+              <span className="flex-shrink mx-4 text-slate-400 text-[10px] font-black uppercase tracking-widest">O con correo</span>
+              <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+
+            <form onSubmit={handleEmailLogin} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Email</label>
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold focus:border-indigo-600 outline-none transition-all"
+                  placeholder="tu@email.com"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Contraseña</label>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold focus:border-indigo-600 outline-none transition-all"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-sm tracking-widest shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all"
+              >
+                Log In / Registro
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   const renderSetup = () => (
+
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-in fade-in slide-in-from-left duration-500">
       {/* List of Routes */}
       <div className="lg:col-span-5 space-y-4">
@@ -849,46 +1100,349 @@ const App: React.FC = () => {
     </div>
   );
 
-  return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 pb-20 font-sans">
-      {/* Header */}
-      <header className="bg-indigo-700 border-b-4 border-indigo-900 p-6 shadow-xl mb-8">
-        <div className="max-w-5xl mx-auto flex justify-between items-center">
-          <div
-            className="flex items-center gap-4 cursor-pointer"
-            onClick={() => {
-              setScreen("home");
-              setGameStatus("setup");
-            }}
-          >
-            <div className="bg-white p-2 rounded-2xl shadow-inner">
-              <BusFront className="w-8 h-8 text-indigo-700" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black uppercase tracking-tighter text-white leading-none">Bus Master</h1>
-              <p className="text-xs font-bold text-indigo-200 opacity-80 uppercase tracking-widest mt-1">
+  const renderGame = () => (
+    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500 pb-32">
+      {/* Feedback Overlay - Stacked Toasts */}
+      <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none w-full max-w-sm px-4 flex flex-col items-center gap-2">
+          {toasts.map(toast => (
+              <div
+                  key={toast.id}
+                  className={`py-3 px-6 rounded-2xl shadow-2xl flex items-center justify-center gap-3 transform transition-all border-4 animate-in slide-in-from-top-4 fade-in duration-300 w-full ${
+                    toast.type === "correct" ? "bg-emerald-600 border-white/20 text-white" : "bg-rose-500 border-rose-400 text-white"
+                  }`}
+                >
+                  {toast.type === "correct" ? <CheckCircle className="w-10 h-10 shrink-0" /> : <X className="w-10 h-10 shrink-0" />}
+                  <div className="text-left min-w-0">
+                    <span className={`${toast.type === "correct" ? "text-2xl" : "text-xl"} font-black uppercase tracking-tighter block leading-none`}>
+                        {toast.type === "correct" ? "¡Correcto!" : "¡Incorrecto!"}
+                    </span>
+                    {toast.text && <span className={`${toast.type === "correct" ? "text-xl text-white underline decoration-wavy decoration-white/30" : "text-sm opacity-90"} font-black block mt-1 break-words`}>{toast.text}</span>}
+                  </div>
+              </div>
+          ))}
+      </div>
 
-                {screen === "home" ? "Escuela de Conductores Profesional" : screen === "failures" ? "PROGRESO" : screen === "errors" ? "ERRORES" : "PON EN PRÁCTICA"}
-              </p>
-            </div>
+      {/* Quick Access Grid */}
+      <div className="flex gap-2 px-2 py-4 overflow-x-auto custom-scrollbar pb-4 snap-x">
+        {uniqueLines.map((line) => (
+          <button
+            key={line.id}
+            onClick={() => {
+              const newId = line.id;
+              const newDir = "ida";
+              setSelectedBaseId(newId);
+              setDirection(newDir);
+              const targetId = `${newId}-${newDir}`;
+              const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(newId)) || BUS_ROUTES[0];
+              const stops = route.stops;
+              setSelectedStops([]);
+              setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
+              setGameStatus("playing");
+              setShake(false);
+              setMaxProgress(0);
+              setCurrentFailures(0);
+              setToasts([]);
+              setTimeout(() => inputRef.current?.focus(), 50);
+            }}
+            className={`w-10 h-10 shrink-0 snap-center rounded-xl font-black text-xs flex items-center justify-center transition-all bg-white shadow-sm border-2 ${
+              selectedBaseId === line.id ? "border-indigo-600 text-indigo-600 ring-2 ring-indigo-100" : "border-slate-200 text-slate-400 hover:border-indigo-300 hover:text-indigo-500"
+            }`}
+          >
+            {line.id}
+          </button>
+        ))}
+      </div>
+
+      {gameStatus === "playing" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-center gap-4">
+            <div className="h-px bg-slate-200 flex-1" />
+            <h3 className="font-black text-slate-400 uppercase tracking-[0.2em] text-[10px]">Selecciona la siguiente parada (A-Z)</h3>
+            <div className="h-px bg-slate-200 flex-1" />
           </div>
 
-          <div className="flex items-center gap-3">
-            {screen !== "home" && (
-              <button onClick={() => setScreen("home")} className="bg-indigo-800/50 p-2 rounded-lg text-white hover:bg-indigo-800/80 transition-colors" title="Menú Principal">
-                <LayoutDashboard className="w-5 h-5" />
+          <form onSubmit={handleSearchSubmit} className="relative group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Escribe para filtrar paradas..."
+              className="w-full pl-12 pr-12 py-4 rounded-2xl border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-700 placeholder:text-slate-300 uppercase tracking-wide bg-white shadow-sm"
+              autoFocus
+            />
+            {searchText && (
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => {
+                  setSearchText("");
+                  inputRef.current?.focus();
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-slate-100 rounded-full text-slate-400 hover:text-rose-500 transition-colors"
+              >
+                <XCircle className="w-5 h-5 fill-current" />
               </button>
             )}
-            {gameStatus === "playing" && (
-              <div className="hidden sm:flex items-center gap-3 bg-indigo-800/50 px-4 py-2 rounded-xl border border-indigo-400/30">
-                <div className="text-right">
-                  <p className="text-indigo-200 text-[10px] font-black uppercase tracking-widest">En Trayecto</p>
-                  <p className="text-white font-bold text-sm truncate max-w-[200px]">{currentRoute.name}</p>
-                </div>
-                <div className={`p-2 rounded-lg ${direction === "ida" ? "bg-emerald-500" : "bg-orange-500"}`}>
-                  {direction === "ida" ? <ArrowUpCircle className="w-5 h-5 text-white" /> : <ArrowDownCircle className="w-5 h-5 text-white" />}
-                </div>
+          </form>
+
+          {searchText && (gameMode === "standard" || gameMode === "study") && (
+            <div className="flex flex-col gap-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                {filteredOptions.length === 0 ? (
+                  <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas {searchText ? `con "${searchText}"` : ""}</div>
+                ) : (
+                  filteredOptions.slice(0, 3).map((option) => {
+                    const isSingleMatch = filteredOptions.length === 1;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handleStopClick(option)}
+                        className={`p-3 rounded-2xl shadow-sm hover:shadow-lg transition-all active:scale-95 flex items-center justify-center text-center font-bold text-xs min-h-[60px] group relative overflow-hidden outline-none 
+                        focus:ring-4 focus:ring-indigo-400 focus:scale-105 focus:z-20
+                        ${isSingleMatch 
+                            ? "bg-emerald-500 text-white border-emerald-600" 
+                            : gameMode === "study" 
+                            ? "bg-sky-50 border-sky-100 text-sky-800 hover:bg-sky-600 hover:text-white" 
+                            : "bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700"}`}
+                      >
+                        <span className="relative z-10 group-hover:scale-105 transition-transform duration-200 line-clamp-2 flex items-center gap-2">
+                          {option.name}
+                          {isSingleMatch && <ChevronRight className="w-4 h-4" />}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {gameStatus === "success" && (
+        <div className="bg-indigo-600 p-12 rounded-[3rem] text-center shadow-2xl animate-in zoom-in-90 duration-500 text-white relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/20 to-transparent" />
+          <div className="relative z-10">
+            <div className="bg-white w-20 h-20 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 shadow-2xl rotate-12">
+              <Trophy className="w-10 h-10 text-indigo-600" />
+            </div>
+            <h2 className="text-4xl font-black mb-2 uppercase tracking-tighter">¡Ruta Completada!</h2>
+            <p className="text-indigo-100 mb-8 font-bold text-lg max-w-md mx-auto">
+              Has demostrado un conocimiento perfecto de la {currentRoute.name} en sentido {direction}.
+            </p>
+            <div className="flex flex-wrap gap-3 justify-center">
+              <button onClick={startNewGame} className="bg-white text-indigo-600 px-8 py-4 rounded-xl font-black uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl text-sm">Reiniciar Reto</button>
+              <button onClick={() => setScreen("home")} className="bg-indigo-900 text-white px-8 py-4 rounded-xl font-black uppercase tracking-widest hover:bg-indigo-950 transition-all shadow-xl text-sm">Menú Principal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {gameStatus === "failed" && (
+        <div className="bg-rose-600 p-12 rounded-[3rem] text-center shadow-2xl text-white animate-in shake duration-500">
+          <div className="bg-white/20 w-20 h-20 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 border-4 border-white/10">
+            <XCircle className="w-10 h-10 text-white" />
+          </div>
+          <h2 className="text-4xl font-black mb-2 uppercase tracking-tighter">¡Error de Ruta!</h2>
+          <p className="text-rose-100 mb-8 font-bold text-lg italic opacity-90">"Un buen conductor nunca olvida sus paradas..."</p>
+          <div className="flex items-center justify-center gap-4 bg-rose-900/40 py-4 px-8 rounded-2xl w-max mx-auto animate-pulse border border-white/10">
+            <RotateCcw className="w-5 h-5 animate-spin" />
+            <span className="font-black uppercase tracking-[0.2em] text-xs">Volviendo al inicio...</span>
+          </div>
+        </div>
+      )}
+
+      {gameStatus === "playing" && (
+        <div className="bg-white rounded-[2rem] shadow-2xl p-6 border-2 border-slate-200 overflow-hidden relative">
+          <div className="absolute top-0 right-0 bg-slate-100 px-4 py-2 rounded-bl-2xl border-b border-l border-slate-200 font-black text-indigo-600 flex items-center gap-3 shadow-sm z-10">
+            <span className="text-xl tabular-nums">{selectedStops.length}</span>
+            <div className="w-px h-4 bg-slate-300" />
+            <span className="text-slate-400 tabular-nums">{targetOrder.length}</span>
+          </div>
+
+          <div className="flex flex-col gap-4 mb-6 pt-2">
+            <div>
+                <div className="flex flex-wrap items-center gap-2 mb-2 pr-24">
+                  <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider">LÍNEA {selectedBaseId}</span>
+                  <span className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-1 ${direction === "ida" ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-700"}`}>
+                    {direction === "ida" ? <ArrowUpCircle size={14} /> : <ArrowDownCircle size={14} />} {direction}
+                  </span>
+
+                  {/* Checkpoint Toggle */}
+                  {gameMode !== "study" && (
+                    <button
+                      onClick={() => setCheckpointEnabled(!checkpointEnabled)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
+                        checkpointEnabled ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-slate-100 text-slate-400 border-slate-200"
+                      }`}
+                      title="Si activas checkpoint, no cuenta para el progreso difícil."
+                    >
+                      <Flag className="w-3 h-3" />
+                      Checkpoint
+                    </button>
+                  )}
+                </div>
+                <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none pr-24">{currentRoute.name}</h2>
+            </div>
+
+            {/* Direction Switch in Game UI */}
+            {availableDirections.count > 1 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (direction !== "ida") {
+                        const newDir = "ida";
+                        setDirection(newDir);
+                        const targetId = `${selectedBaseId}-${newDir}`;
+                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                        const stops = route.stops;
+                        setSelectedStops([]);
+                        setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
+                        setGameStatus("playing");
+                        setShake(false);
+                        setMaxProgress(0);
+                        setCurrentFailures(0);
+                        setToasts([]);
+                        if (inputRef.current) inputRef.current.focus();
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-wide flex items-center gap-1 ${
+                        direction === "ida" ? "bg-emerald-500 text-white shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                    }`}
+                  >
+                    <ArrowUpCircle className="w-3 h-3" /> IDA
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (direction !== "vuelta") {
+                        const newDir = "vuelta";
+                        setDirection(newDir);
+                        const targetId = `${selectedBaseId}-${newDir}`;
+                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                        const stops = route.stops;
+                        setSelectedStops([]);
+                        setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
+                        setGameStatus("playing");
+                        setShake(false);
+                        setMaxProgress(0);
+                        setCurrentFailures(0);
+                        setToasts([]);
+                        if (inputRef.current) inputRef.current.focus();
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-wide flex items-center gap-1 ${
+                        direction === "vuelta" ? "bg-orange-500 text-white shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                    }`}
+                  >
+                    <ArrowDownCircle className="w-3 h-3" /> VUELTA
+                  </button>
+                </div>
+            )}
+          </div>
+
+          <div className={`flex flex-wrap gap-2 content-start items-start min-h-[90px] p-4 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 transition-all ${shake ? "shake border-rose-500 border-solid bg-rose-50" : ""}`}>
+            {selectedStops.length === 0 && (
+              <div className="flex flex-col items-center justify-center w-full py-4 text-slate-400 animate-pulse">
+                <MapPin className="w-8 h-8 mb-1 opacity-20" />
+                <p className="font-black uppercase text-[10px] tracking-[0.3em]">Pulsa la parada de salida</p>
+              </div>
+            )}
+            {selectedStops.map((stop, idx) => (
+              <button
+                key={idx}
+                onClick={() => {
+                  const newSelected = selectedStops.slice(0, idx + 1);
+                  setSelectedStops(newSelected);
+                  const restoredOptions = targetOrder.map((name, i) => ({ id: `${i}-${name}`, name })).filter((_, i) => i > idx);
+                  setAvailableOptions(restoredOptions);
+                }}
+                className={`text-white pl-2 pr-4 py-2 rounded-xl font-bold text-xs shadow-md flex items-center gap-2 border-b-2 transition-all ${direction === "ida" ? "bg-emerald-600 border-emerald-800" : "bg-orange-600 border-orange-800"}`}
+              >
+                <span className="bg-white text-slate-800 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0">{idx + 1}</span>
+                <span className="whitespace-normal">{stop}</span>
+              </button>
+            ))}
+
+            {/* REWIND GHOST CARDS */}
+            {maxProgress > selectedStops.length && targetOrder.slice(selectedStops.length, maxProgress).map((stopName, i) => {
+                const realIndex = selectedStops.length + i;
+                return (
+                    <button
+                         key={`ghost-${realIndex}`}
+                         onClick={() => {
+                             const restoredStops = targetOrder.slice(0, realIndex + 1);
+                             setSelectedStops(restoredStops);
+                             const restoredOptions = targetOrder.map((name, k) => ({ id: `${k}-${name}`, name })).filter((_, k) => k > realIndex);
+                             setAvailableOptions(restoredOptions);
+                             if (inputRef.current) inputRef.current.focus();
+                         }}
+                         className="opacity-50 hover:opacity-80 transition-opacity pl-2 pr-4 py-2 rounded-xl font-bold text-xs border-2 border-slate-300 bg-slate-100 flex items-center gap-2 text-slate-500 cursor-pointer"
+                    >
+                         <span className="bg-slate-300 text-slate-500 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0">{realIndex + 1}</span>
+                         <span className="whitespace-normal">{stopName}</span>
+                    </button>
+                )
+            })}
+
+            {/* Ghost Hint for Study/Memorize Mode */}
+            {gameMode === "study" && targetOrder.slice(selectedStops.length, selectedStops.length + 1).map((stopName, i) => {
+              const realIndex = selectedStops.length + i;
+              return (
+                <button
+                  key={`future-ghost-${realIndex}`}
+                  onClick={() => {
+                    handleStopClick({ id: `${realIndex}-${stopName}`, name: stopName });
+                  }}
+                  className="group appearance-none bg-sky-50/50 hover:bg-sky-100 text-sky-700/60 hover:text-sky-700 pl-2 pr-4 py-2 rounded-xl font-bold text-xs border-2 border-sky-100 hover:border-sky-400 flex items-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95 outline-none focus:ring-2 focus:ring-sky-300"
+                >
+                  <span className="bg-white/80 text-sky-500 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0 shadow-sm group-hover:scale-110 transition-transform">{realIndex + 1}</span>
+                  <span className="whitespace-normal text-left">{stopName}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-6">
+            <div className="bg-slate-100 h-4 rounded-full p-0.5 overflow-hidden border border-slate-200 shadow-inner">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ease-out shadow-lg ${
+                  selectedStops.length === targetOrder.length ? "bg-indigo-500" : direction === "ida" ? "bg-emerald-500" : "bg-orange-500"
+                }`}
+                style={{ width: `${(selectedStops.length / targetOrder.length) * 100}%` }}
+              >
+                <div className="w-full h-full bg-white/20 animate-pulse" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-100 text-slate-900 pb-20 font-sans">
+      <header className="bg-indigo-700 border-b-4 border-indigo-900 p-6 shadow-xl mb-8">
+        <div className="max-w-5xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setScreen("home"); setGameStatus("setup"); }}>
+            <div className="bg-white p-2 rounded-2xl shadow-inner"><BusFront className="w-8 h-8 text-indigo-700" /></div>
+            <div>
+              <h1 className="text-2xl font-black uppercase tracking-tighter text-white leading-none">Bus Master</h1>
+              <p className="text-xs font-bold text-indigo-200 opacity-80 uppercase tracking-widest mt-1">Escuela de Conductores Profesional</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {session ? (
+              <button onClick={() => setScreen("auth")} className="flex items-center gap-2 bg-indigo-800/50 px-4 py-2 rounded-xl text-white hover:bg-indigo-800 transition-colors">
+                <User className="w-4 h-4" /> <span className="text-xs font-bold">{session.user.email}</span>
+              </button>
+            ) : (
+              <button onClick={() => setScreen("auth")} className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl text-white hover:bg-white/20 transition-colors">
+                <LogIn className="w-4 h-4" /> <span className="text-xs font-bold">Login</span>
+              </button>
             )}
           </div>
         </div>
@@ -944,517 +1498,28 @@ const App: React.FC = () => {
       <main className="max-w-5xl mx-auto px-4">
         {screen === "home" && renderHome()}
         {screen === "setup" && renderSetup()}
-
         {screen === "failures" && renderProgress()}
         {screen === "errors" && renderErrors()}
-
-        {/* Playing & Success Screens (Integrated) */}
-        {(gameStatus === "playing" || gameStatus === "success" || gameStatus === "failed") && screen === "playing" && (
-          <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500 pb-32">
-            {/* Feedback Overlay - Updated to Top Compact */}
-            {/* Feedback Overlay - Stacked Toasts */}
-            <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none w-full max-w-sm px-4 flex flex-col items-center gap-2">
-                {toasts.map(toast => (
-                    <div
-                        key={toast.id}
-                        className={`py-3 px-6 rounded-2xl shadow-2xl flex items-center justify-center gap-3 transform transition-all border-4 animate-in slide-in-from-top-4 fade-in duration-300 w-full ${
-                          toast.type === "correct" ? "bg-emerald-600 border-white/20 text-white" : "bg-rose-500 border-rose-400 text-white"
-                        }`}
-                      >
-                        {toast.type === "correct" ? <CheckCircle className="w-10 h-10 shrink-0" /> : <X className="w-10 h-10 shrink-0" />}
-                        <div className="text-left min-w-0">
-                          <span className={`${toast.type === "correct" ? "text-2xl" : "text-xl"} font-black uppercase tracking-tighter block leading-none`}>
-                              {toast.type === "correct" ? "¡Correcto!" : "¡Incorrecto!"}
-                          </span>
-                          {toast.text && <span className={`${toast.type === "correct" ? "text-xl text-white underline decoration-wavy decoration-white/30" : "text-sm opacity-90"} font-black block mt-1 break-words`}>{toast.text}</span>}
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Quick Access Grid */}
-            <div className="flex gap-2 px-2 py-4 overflow-x-auto custom-scrollbar pb-4 snap-x">
-              {uniqueLines.map((line) => (
-                <button
-                  key={line.id}
-                  onClick={() => {
-                    const newId = line.id;
-                    const newDir = "ida";
-
-                    setSelectedBaseId(newId);
-                    setDirection(newDir);
-
-                    const targetId = `${newId}-${newDir}`;
-                    const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(newId)) || BUS_ROUTES[0];
-                    const stops = route.stops;
-
-                    setSelectedStops([]);
-                    setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
-                    setGameStatus("playing");
-                    setShake(false);
-                    setMaxProgress(0);
-                    setCurrentFailures(0);
-                    setToasts([]);
-                    setTimeout(() => inputRef.current?.focus(), 50);
-                  }}
-                  className={`w-10 h-10 shrink-0 snap-center rounded-xl font-black text-xs flex items-center justify-center transition-all bg-white shadow-sm border-2 ${
-                    selectedBaseId === line.id ? "border-indigo-600 text-indigo-600 ring-2 ring-indigo-100" : "border-slate-200 text-slate-400 hover:border-indigo-300 hover:text-indigo-500"
-                  }`}
-                >
-                  {line.id}
-                </button>
-              ))}
-            </div>
-
-            {/* Game Status Sections (Moved Up) */}
-            {gameStatus === "playing" && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-center gap-4">
-                  <div className="h-px bg-slate-200 flex-1" />
-                  <h3 className="font-black text-slate-400 uppercase tracking-[0.2em] text-[10px]">Selecciona la siguiente parada (A-Z)</h3>
-                  <div className="h-px bg-slate-200 flex-1" />
-                </div>
-
-                {gameStatus === "success" ? (
-                  <div className="bg-emerald-50 border-4 border-emerald-100 p-8 rounded-[2rem] text-center space-y-6 animate-in zoom-in-95">
-                    <div className="bg-emerald-500 w-20 h-20 rounded-full flex items-center justify-center text-white mx-auto shadow-lg shadow-emerald-200">
-                      <Trophy className="w-10 h-10 fill-current" />
-                    </div>
-                    <div>
-                      <h2 className="text-3xl font-black text-emerald-800 uppercase tracking-tighter mb-2">¡Línea Completada!</h2>
-                      <p className="text-emerald-600 font-bold">Has recorrido todas las paradas correctamente.</p>
-                    </div>
-
-                    <div className="flex flex-col gap-3 max-w-xs mx-auto pt-4">
-                      {/* Suggest opposite route if available */}
-                      {(() => {
-                        const oppositeDir = direction === "ida" ? "vuelta" : "ida";
-                        const oppositeId = `${selectedBaseId}-${oppositeDir}`;
-                        const hasOpposite = BUS_ROUTES.some((r) => r.id === oppositeId);
-
-                        return (
-                          hasOpposite && (
-                            <button
-                              className="bg-indigo-600 hover:bg-indigo-500 text-white w-full py-4 rounded-xl font-black uppercase text-sm tracking-widest shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
-                              onClick={() => {
-                                setDirection(oppositeDir);
-                                setTimeout(() => {
-                                  setScreen("setup");
-                                  window.scrollTo({ top: 0, behavior: "smooth" });
-                                }, 50);
-                              }}
-                            >
-                              <RefreshCw className="w-5 h-5" />
-                              Hacer la {oppositeDir}
-                            </button>
-                          )
-                        );
-                      })()}
-
-                      <button
-                        onClick={() => startNewGame()}
-                        className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 w-full py-4 rounded-xl font-black uppercase text-sm tracking-widest transition-all flex items-center justify-center gap-2"
-                      >
-                        <RotateCcw className="w-5 h-5" />
-                        Reiniciar Reto
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setScreen("home");
-                          setGameStatus("setup");
-                        }}
-                        className="bg-white border-2 border-slate-200 text-slate-500 hover:text-slate-700 w-full py-4 rounded-xl font-black uppercase text-sm tracking-widest hover:bg-slate-50 transition-all"
-                      >
-                        Menú Principal
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <form onSubmit={handleSearchSubmit} className="relative group">
-                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                      <input
-                        ref={inputRef}
-                        type="text"
-                        value={searchText}
-                        onChange={(e) => setSearchText(e.target.value)}
-                        placeholder="Escribe para filtrar paradas..."
-                        className="w-full pl-12 pr-12 py-4 rounded-2xl border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-700 placeholder:text-slate-300 uppercase tracking-wide bg-white shadow-sm"
-                        autoFocus
-                      />
-                      {searchText && (
-                        <button
-                          type="button"
-                          tabIndex={-1} // Skip focus on clear button
-                          onClick={() => {
-                            setSearchText("");
-                            inputRef.current?.focus();
-                          }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-slate-100 rounded-full text-slate-400 hover:text-rose-500 transition-colors"
-                        >
-                          <XCircle className="w-5 h-5 fill-current" />
-                        </button>
-                      )}
-                    </form>
-
-                    {/* Denser grid and alphabetical order for faster pedagogical search */}
-                    {/* Display cards grid: Always in standard mode, OR in study mode only when searching */}
-                    {searchText && (gameMode === "standard" || gameMode === "study") && (
-                      <div className="flex flex-col gap-6">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                          {filteredOptions.length === 0 ? (
-                            <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas {searchText ? `con "${searchText}"` : ""}</div>
-                          ) : (
-                            filteredOptions.slice(0, 3).map((option) => {
-                              const isSingleMatch = filteredOptions.length === 1;
-                              return (
-                                <button
-                                  key={option.id}
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()} // Prevent focus loss from input on mouse click, but allows Tab focus
-                                  onClick={() => handleStopClick(option)}
-                                  className={`p-3 rounded-2xl shadow-sm hover:shadow-lg transition-all active:scale-95 flex items-center justify-center text-center font-bold text-xs min-h-[60px] group relative overflow-hidden outline-none 
-                              focus:ring-4 focus:ring-indigo-400 focus:scale-105 focus:z-20
-                              ${isSingleMatch 
-                                  ? "bg-emerald-500 text-white border-emerald-600" 
-                                  : gameMode === "study" 
-                                  ? "bg-sky-50 border-sky-100 text-sky-800 hover:bg-sky-600 hover:text-white" 
-                                  : "bg-white hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-700 text-slate-700"}`}
-                                >
-                                  <span className="relative z-10 group-hover:scale-105 transition-transform duration-200 line-clamp-2 flex items-center gap-2">
-                                    {option.name}
-                                    {isSingleMatch && <ChevronRight className="w-4 h-4" />}
-                                  </span>
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
-
-                        {filteredOptions.length > 3 && (
-                          <div className="col-span-full py-2 text-center text-slate-400 font-bold italic opacity-70 flex flex-col items-center gap-1">
-                            <div className="flex items-center gap-2 text-sm justify-center">
-                              <Search className="w-4 h-4 opacity-40" />
-                              <span>Hay {filteredOptions.length} paradas disponibles</span>
-                            </div>
-                            <span className="text-[10px] opacity-60">Mostrando las 3 primeras. Sigue escribiendo para filtrar más.</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            {gameStatus === "success" && (
-              <div className="bg-indigo-600 p-12 rounded-[3rem] text-center shadow-2xl animate-in zoom-in-90 duration-500 text-white relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/20 to-transparent" />
-                <div className="relative z-10">
-                  <div className="bg-white w-20 h-20 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 shadow-2xl rotate-12">
-                    <Trophy className="w-10 h-10 text-indigo-600" />
-                  </div>
-                  <h2 className="text-4xl font-black mb-2 uppercase tracking-tighter">¡Ruta Completada!</h2>
-                  <p className="text-indigo-100 mb-8 font-bold text-lg max-w-md mx-auto">
-                    Has demostrado un conocimiento perfecto de la {currentRoute.name} en sentido {direction}.
-                  </p>
-                  <div className="flex flex-wrap gap-3 justify-center">
-                    <button
-                      onClick={startNewGame}
-                      className="bg-white text-indigo-600 px-8 py-4 rounded-xl font-black uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl active:scale-95 text-sm"
-                    >
-                      Reiniciar Reto
-                    </button>
-                    <button
-                      onClick={() => setScreen("home")}
-                      className="bg-indigo-900 text-white px-8 py-4 rounded-xl font-black uppercase tracking-widest hover:bg-indigo-950 transition-all shadow-xl active:scale-95 text-sm"
-                    >
-                      Menú Principal
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {gameStatus === "failed" && (
-              <div className="bg-rose-600 p-12 rounded-[3rem] text-center shadow-2xl text-white animate-in shake duration-500">
-                <div className="bg-white/20 w-20 h-20 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 border-4 border-white/10">
-                  <XCircle className="w-10 h-10 text-white" />
-                </div>
-                <h2 className="text-4xl font-black mb-2 uppercase tracking-tighter">¡Error de Ruta!</h2>
-                <p className="text-rose-100 mb-8 font-bold text-lg italic opacity-90">"Un buen conductor nunca olvida sus paradas..."</p>
-                <div className="flex items-center justify-center gap-4 bg-rose-900/40 py-4 px-8 rounded-2xl w-max mx-auto animate-pulse border border-white/10">
-                  <RotateCcw className="w-5 h-5 animate-spin" />
-                  <span className="font-black uppercase tracking-[0.2em] text-xs">Volviendo al inicio...</span>
-                </div>
-              </div>
-            )}
-
-            {gameStatus === "playing" && selectedStops.length > 0 && (
-              <div className="max-w-md mx-auto mb-6 px-4 animate-in fade-in slide-in-from-top duration-700">
-                <div className="flex items-center gap-4 px-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-slate-200 border border-slate-300 shadow-inner" />
-                  <div className="flex-1 h-0.5 bg-slate-100 relative flex items-center justify-center">
-                    <div className="absolute bg-white px-5 py-2.5 rounded-[1.25rem] border-2 border-slate-100 shadow-lg flex items-center gap-3 min-w-max">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-inner ${direction === "ida" ? "bg-emerald-100 text-emerald-600" : "bg-orange-100 text-orange-600"}`}>
-                        <MapPin className="w-4 h-4" />
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none mb-1">Última Parada</span>
-                        <span className="text-xs font-black text-slate-700 uppercase leading-none">{selectedStops[selectedStops.length - 1]}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="w-2.5 h-2.5 rounded-full bg-slate-200 border border-slate-300 shadow-inner" />
-                </div>
-              </div>
-            )}
-
-            {/* The Stacking Visual Section (Moved Down) */}
-            <div className="bg-white rounded-[2rem] shadow-2xl p-6 border-2 border-slate-200 overflow-hidden relative">
-              
-              {/* Absolute Count - Top Right */}
-              <div className="absolute top-0 right-0 bg-slate-100 px-4 py-2 rounded-bl-2xl border-b border-l border-slate-200 font-black text-indigo-600 flex items-center gap-3 shadow-sm z-10">
-                <span className="text-xl tabular-nums">{selectedStops.length}</span>
-                <div className="w-px h-4 bg-slate-300" />
-                <span className="text-slate-400 tabular-nums">{targetOrder.length}</span>
-              </div>
-
-              <div className="flex flex-col gap-4 mb-6 pt-2">
-                {/* Header Info with Line Number and Tags */}
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 mb-2 pr-24">
-                    <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider">
-                      LÍNEA {selectedBaseId}
-                    </span>
-                    
-                    {/* Direction Tag */}
-                    <span className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-1 ${
-                        direction === "ida" ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-700"
-                    }`}>
-                        {direction === "ida" ? <ArrowUpCircle size={14} /> : <ArrowDownCircle size={14} />}
-                        {direction}
-                    </span>
-
-                    {/* Checkpoint Toggle */}
-                    {gameMode !== "study" && (
-                      <button
-                        onClick={() => setCheckpointEnabled(!checkpointEnabled)}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
-                          checkpointEnabled ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-slate-100 text-slate-400 border-slate-200"
-                        }`}
-                        title="Si activas checkpoint, no cuenta para el progreso difícil."
-                      >
-                        <Flag className="w-3 h-3" />
-                        Checkpoint
-                      </button>
-                    )}
-                  </div>
-                  <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter leading-none pr-24">{currentRoute.name}</h2>
-                </div>
-
-                {/* Direction Switch - Conditional - Compact Row */}
-                {availableDirections.count > 1 && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          if (direction !== "ida") {
-                            const newDir = "ida";
-                            setDirection(newDir);
-                            const targetId = `${selectedBaseId}-${newDir}`;
-                            const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
-                            const stops = route.stops;
-                            setSelectedStops([]);
-                            setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
-                            setGameStatus("playing");
-                            setShake(false);
-                            setMaxProgress(0);
-                            setCurrentFailures(0);
-                            setToasts([]);
-                            if (inputRef.current) inputRef.current.focus();
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-wide flex items-center gap-1 ${
-                            direction === "ida" ? "bg-emerald-500 text-white shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-                        }`}
-                      >
-                        <ArrowUpCircle className="w-3 h-3" /> IDA
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (direction !== "vuelta") {
-                            const newDir = "vuelta";
-                            setDirection(newDir);
-                            const targetId = `${selectedBaseId}-${newDir}`;
-                            const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
-                            const stops = route.stops;
-                            setSelectedStops([]);
-                            setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
-                            setGameStatus("playing");
-                            setShake(false);
-                            setMaxProgress(0);
-                            setCurrentFailures(0);
-                            setToasts([]);
-                            if (inputRef.current) inputRef.current.focus();
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-black uppercase tracking-wide flex items-center gap-1 ${
-                            direction === "vuelta" ? "bg-orange-500 text-white shadow-sm" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-                        }`}
-                      >
-                        <ArrowDownCircle className="w-3 h-3" /> VUELTA
-                      </button>
-                    </div>
-                )}
-              </div>
-
-              <div
-                className={`flex flex-wrap gap-2 content-start items-start min-h-[90px] p-4 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 transition-all ${
-                  shake ? "shake border-rose-500 border-solid bg-rose-50" : ""
-                }`}
-              >
-                {selectedStops.length === 0 && (
-                  <div className="flex flex-col items-center justify-center w-full py-4 text-slate-400 animate-pulse">
-                    <MapPin className="w-8 h-8 mb-1 opacity-20" />
-                    <p className="font-black uppercase text-[10px] tracking-[0.3em]">Pulsa la parada de salida</p>
-                  </div>
-                )}
-                {selectedStops.map((stop, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      // Rewind to this stop (keep it and previous ones)
-                      const newSelected = selectedStops.slice(0, idx + 1);
-                      setSelectedStops(newSelected);
-
-                      // Restore available options: All stops that come AFTER this index
-                      // We reconstruct from targetOrder to ensure we get the correct IDs back
-                      const restoredOptions = targetOrder.map((name, i) => ({ id: `${i}-${name}`, name })).filter((_, i) => i > idx);
-
-                      setAvailableOptions(restoredOptions);
-
-                      // Clear feedback and shake to ensure clean state
-                      setToasts([]);
-                      setShake(false);
-                      // Focus input
-                      setTimeout(() => inputRef.current?.focus(), 50);
-                    }}
-                    className={`text-white pl-2 pr-4 py-2 rounded-xl font-bold text-xs shadow-md animate-in zoom-in-75 duration-300 flex items-center gap-2 border-b-2 group transition-all hover:scale-105 active:scale-95 text-left leading-tight ${
-                      direction === "ida" ? "bg-emerald-600 border-emerald-800 hover:bg-emerald-500" : "bg-orange-600 border-orange-800 hover:bg-orange-500"
-                    }`}
-                  >
-                    <span className="bg-white text-slate-800 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shadow-sm shrink-0">{idx + 1}</span>
-                    <span className="whitespace-normal">{stop}</span>
-                  </button>
-                ))}
-
-                {/* REWIND GHOST CARDS */}
-                {maxProgress > selectedStops.length && targetOrder.slice(selectedStops.length, maxProgress).map((stopName, i) => {
-                    const realIndex = selectedStops.length + i;
-                    return (
-                        <button
-                             key={`ghost-${realIndex}`}
-                             onClick={() => {
-                                 // Forward Rewind: Restore up to this ghost stop
-                                 const restoredStops = targetOrder.slice(0, realIndex + 1);
-                                 setSelectedStops(restoredStops);
-                                 
-                                 const restoredOptions = targetOrder.map((name, k) => ({ id: `${k}-${name}`, name })).filter((_, k) => k > realIndex);
-                                 setAvailableOptions(restoredOptions);
-                                 if (inputRef.current) inputRef.current.focus();
-                             }}
-                             className="opacity-50 hover:opacity-80 transition-opacity pl-2 pr-4 py-2 rounded-xl font-bold text-xs border-2 border-slate-300 bg-slate-100 flex items-center gap-2 text-slate-500 cursor-pointer"
-                        >
-                             <span className="bg-slate-300 text-slate-500 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0">{realIndex + 1}</span>
-                             <span className="whitespace-normal">{stopName}</span>
-                        </button>
-                    )
-                })}
-
-                {/* Ghost Hint for Study/Memorize Mode - Interactivo e Integral */}
-                {gameMode === "study" && targetOrder.slice(selectedStops.length, selectedStops.length + 1).map((stopName, i) => {
-                  const realIndex = selectedStops.length + i;
-                  return (
-                    <button
-                      key={`future-ghost-${realIndex}`}
-                      onClick={() => {
-                        handleStopClick({ id: `${realIndex}-${stopName}`, name: stopName });
-                      }}
-                      className="group appearance-none bg-sky-50/50 hover:bg-sky-100 text-sky-700/60 hover:text-sky-700 pl-2 pr-4 py-2 rounded-xl font-bold text-xs border-2 border-sky-100 hover:border-sky-400 flex items-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95 outline-none focus:ring-2 focus:ring-sky-300"
-                    >
-                      <span className="bg-white/80 text-sky-500 w-6 h-6 flex items-center justify-center rounded text-[10px] font-black shrink-0 shadow-sm group-hover:scale-110 transition-transform">{realIndex + 1}</span>
-                      <span className="whitespace-normal text-left">{stopName}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-6">
-                <div className="bg-slate-100 h-4 rounded-full p-0.5 overflow-hidden border border-slate-200 shadow-inner">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ease-out shadow-lg ${
-                      selectedStops.length === targetOrder.length ? "bg-indigo-500" : direction === "ida" ? "bg-emerald-500" : "bg-orange-500"
-                    }`}
-                    style={{ width: `${(selectedStops.length / targetOrder.length) * 100}%` }}
-                  >
-                    <div className="w-full h-full bg-white/20 animate-pulse" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {screen === "auth" && renderAuth()}
+        {screen === "playing" && renderGame()}
       </main>
 
-      {/* Persistent Navigation */}
       {screen === "playing" && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex gap-3 z-50">
-          <button
-            onClick={() => {
-              setScreen("setup");
-              setGameStatus("setup");
-            }}
-            className="bg-slate-900 text-white px-6 py-4 rounded-[1.5rem] shadow-2xl hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2 font-black uppercase text-[10px] tracking-widest border-b-4 border-slate-950"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Elegir otra Línea
+          <button onClick={() => { setScreen("setup"); setGameStatus("setup"); }} className="bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-2 font-black uppercase text-xs tracking-widest">
+            <ChevronLeft className="w-4 h-4" /> Menú de Línea
           </button>
-          <button
-            onClick={startNewGame}
-            className="bg-white text-slate-900 px-6 py-4 rounded-[1.5rem] shadow-2xl hover:bg-slate-50 transition-all active:scale-95 flex items-center gap-2 font-black uppercase text-[10px] tracking-widest border-2 border-slate-200 border-b-4"
-          >
-            <RotateCcw className="w-4 h-4" />
-            Resetear
+          <button onClick={startNewGame} className="bg-white text-slate-900 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-2 font-black uppercase text-xs tracking-widest border-2 border-slate-200">
+            <RotateCcw className="w-4 h-4" /> Resetear
           </button>
         </div>
       )}
 
-      {/* Global Styles for Scrollbar and Animations */}
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: #f1f5f9;
-          border-radius: 20px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #cbd5e1;
-          border-radius: 20px;
-          border: 2px solid #f1f5f9;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #94a3b8;
-        }
-        @keyframes animate-spin-slow {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .animate-spin-slow {
-          animation: animate-spin-slow 8s linear infinite;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 20px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 20px; border: 2px solid #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}</style>
     </div>
   );
