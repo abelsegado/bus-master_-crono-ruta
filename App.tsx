@@ -33,6 +33,8 @@ import {
   User,
   FileText,
   Layers,
+  Sparkles,
+  HelpCircle,
 } from "lucide-react";
 import { GameDirection, RouteData, GameStatus, GameDifficulty, GameMode } from "./types";
 
@@ -240,8 +242,13 @@ const App: React.FC = () => {
   });
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
+  const [isDoubtful, setIsDoubtful] = useState(false);
   const [quizHighScores, setQuizHighScores] = useState<Record<string, { correct: number, total: number }>>(() => {
     const saved = localStorage.getItem("bus_master_quiz_high_scores");
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [quizQuestionSuccessStreaks, setQuizQuestionSuccessStreaks] = useState<Record<number, number>>(() => {
+    const saved = localStorage.getItem("bus_master_quiz_streaks");
     return saved ? JSON.parse(saved) : {};
   });
 
@@ -329,6 +336,10 @@ const App: React.FC = () => {
     localStorage.setItem("bus_master_quiz_high_scores", JSON.stringify(quizHighScores));
   }, [quizHighScores]);
 
+  useEffect(() => {
+    localStorage.setItem("bus_master_quiz_streaks", JSON.stringify(quizQuestionSuccessStreaks));
+  }, [quizQuestionSuccessStreaks]);
+
   // Cloud Sync Logic
   const loadOnlineProgress = useCallback(async () => {
     try {
@@ -345,6 +356,7 @@ const App: React.FC = () => {
         if (data.crowns) setCrowns(data.crowns);
         if (data.failed_quiz_questions) setFailedQuizQuestions(data.failed_quiz_questions);
         if (data.quiz_high_scores) setQuizHighScores(data.quiz_high_scores);
+        if (data.quiz_question_success_streaks) setQuizQuestionSuccessStreaks(data.quiz_question_success_streaks);
         if (data.line_order && data.line_order.length > 0) {
           // Update uniqueLines if order is stored
           const linesMap = new Map<string, string>();
@@ -377,13 +389,14 @@ const App: React.FC = () => {
           line_order: uniqueLines.map(l => l.id),
           failed_quiz_questions: failedQuizQuestions,
           quiz_high_scores: quizHighScores,
+          quiz_question_success_streaks: quizQuestionSuccessStreaks,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
       // console.log("Progreso guardado en la nube correctamente");
     } catch (e) {
       console.error("Error saving progress to Supabase:", e);
     }
-  }, [userId, session, completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores]);
+  }, [userId, session, completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, quizQuestionSuccessStreaks]);
 
   // Initial load from cloud
   useEffect(() => {
@@ -396,7 +409,7 @@ const App: React.FC = () => {
       saveOnlineProgress();
     }, 3000); // 3 second debounce
     return () => clearTimeout(timer);
-  }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, saveOnlineProgress]);
+  }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, quizQuestionSuccessStreaks, saveOnlineProgress]);
 
 
   const markCompleted = (routeId: string) => {
@@ -451,7 +464,26 @@ const App: React.FC = () => {
     setQuizFinished(false);
     setSelectedAnswer(null);
     setShowExplanation(false);
+    setIsDoubtful(false);
     setScreen("quiz");
+  };
+
+  const startRandomCategoryQuiz = () => {
+    const list = quizCategory === "exams" ? ALL_EXAMS : ALL_SIMULACROS;
+    const allQs = list.flatMap(e => e.preguntas);
+    if (allQs.length === 0) return;
+
+    const shuffled = [...allQs].sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, 20);
+
+    const virtualExam: Exam = {
+      id: `random-${quizCategory}-${Date.now()}`,
+      examen: quizCategory === "exams" ? "Test Aleatorio Temas" : "Simulacro Mezclado",
+      temario: "Preguntas variadas de toda la categoría",
+      preguntas: selected
+    };
+
+    startQuiz("random", virtualExam);
   };
 
   const handleQuizAnswer = (answer: string) => {
@@ -462,17 +494,46 @@ const App: React.FC = () => {
     const userAnsBase = answer.split(')')[0].trim().toLowerCase();
     const isCorrect = userAnsBase === currentQ.respuesta.toLowerCase();
 
+    const qId = Number(currentQ.id);
+
     if (isCorrect) {
       playSound("success");
       setQuizScore(prev => ({ ...prev, correct: prev.correct + 1 }));
-      if (quizType === "errors") {
-        setFailedQuizQuestions(prev => prev.filter(id => id !== Number(currentQ.id)));
+      
+      if (isDoubtful) {
+        // MODO MAESTRÍA ACTIVADO (por pulsar "Tengo Duda")
+        // Reiniciamos racha y aseguramos que esté en fallos
+        setQuizQuestionSuccessStreaks(prev => ({ ...prev, [qId]: 0 }));
+        setFailedQuizQuestions(prev => prev.includes(qId) ? prev : [...prev, qId]);
+      } else {
+        // Acierto sin duda:
+        const hasStreak = quizQuestionSuccessStreaks[qId] !== undefined;
+        
+        if (hasStreak) {
+          // Si estaba en modo maestría, incrementamos racha
+          setQuizQuestionSuccessStreaks(prev => {
+            const currentStreak = (prev[qId] || 0) + 1;
+            if (currentStreak >= 8) {
+              setFailedQuizQuestions(old => old.filter(id => id !== qId));
+              const { [qId]: _, ...rest } = prev;
+              return rest;
+            }
+            return { ...prev, [qId]: currentStreak };
+          });
+        } else if (failedQuizQuestions.includes(qId)) {
+          // Si era un fallo normal (sin racha), se borra al primer acierto
+          setFailedQuizQuestions(old => old.filter(id => id !== qId));
+        }
       }
     } else {
       playSound("error");
+      // Fallo: añadimos a fallos y si ya tenía racha, la reiniciamos
+      if (quizQuestionSuccessStreaks[qId] !== undefined) {
+        setQuizQuestionSuccessStreaks(prev => ({ ...prev, [qId]: 0 }));
+      }
       setFailedQuizQuestions(prev => {
-        if (prev.includes(Number(currentQ.id))) return prev;
-        return [...prev, Number(currentQ.id)];
+        if (prev.includes(qId)) return prev;
+        return [...prev, qId];
       });
     }
 
@@ -483,6 +544,7 @@ const App: React.FC = () => {
         setCurrentQuizIndex(prev => prev + 1);
         setSelectedAnswer(null);
         setShowExplanation(false);
+        setIsDoubtful(false);
       } else {
         setQuizFinished(true);
         if (selectedExam) {
@@ -701,127 +763,156 @@ const App: React.FC = () => {
 
   // Screens
   const renderHome = () => (
-    <div className="flex flex-col items-center justify-center space-y-6 py-6 px-4 animate-in fade-in duration-500">
-      <div className="text-center space-y-2 mb-4">
-        <div className="bg-indigo-700 p-4 rounded-[2rem] inline-block shadow-2xl mb-2">
-          <BusFront className="w-14 h-14 text-white" />
+    <div className="flex flex-col items-center justify-center space-y-8 py-8 px-4 animate-in fade-in duration-700">
+      {/* BRAND HEADER */}
+      <div className="text-center space-y-3 mb-2">
+        <div className="relative inline-block">
+          <div className="absolute inset-0 bg-indigo-600 blur-2xl opacity-20 rounded-full animate-pulse"></div>
+          <div className="relative bg-gradient-to-br from-indigo-600 to-indigo-800 p-5 rounded-[2.5rem] shadow-2xl border-4 border-white/10">
+            <BusFront className="w-12 h-12 text-white" />
+          </div>
         </div>
-        <h1 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">Bus Master</h1>
-        <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-xs">Escuela de Conductores Profesional</p>
+        <div className="space-y-1">
+          <h1 className="text-4xl font-black text-slate-800 tracking-tighter uppercase leading-none">Bus Master</h1>
+          <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px]">Escuela de Conductores</p>
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 mb-2">
+      {/* AUTH BUTTON */}
+      <div className="relative">
         {session ? (
           <button 
             onClick={() => setScreen("auth")}
-            className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-2xl hover:bg-slate-200 transition-all"
+            className="flex items-center gap-3 bg-white border-2 border-slate-100 pl-2 pr-5 py-2 rounded-2xl hover:border-indigo-600 hover:shadow-xl transition-all group"
           >
-            <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-sm text-white font-black shadow-lg group-hover:rotate-12 transition-transform">
               {username.charAt(0).toUpperCase()}
             </div>
-            <span className="text-xs font-bold text-slate-600 truncate max-w-[120px]">{username}</span>
+            <div className="text-left">
+               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Conductor</span>
+               <span className="text-xs font-black text-slate-700 truncate max-w-[120px]">{username}</span>
+            </div>
           </button>
         ) : (
           <button 
             onClick={() => setScreen("auth")}
-            className="flex items-center gap-2 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-2xl hover:bg-indigo-100 transition-all border border-indigo-100"
+            className="flex items-center gap-3 bg-indigo-600 text-white px-6 py-3 rounded-2xl hover:bg-indigo-700 hover:shadow-2xl transition-all shadow-lg font-black uppercase text-xs tracking-widest"
           >
             <LogIn className="w-4 h-4" />
-            <span className="text-xs font-black uppercase tracking-wider">Iniciar Sesión</span>
+            Iniciar Sesión
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 w-full max-w-2xl">
-
-        <button
-          onClick={() => {
-            setScreen("setup");
-            setGameStatus("setup");
-            setGameMode("standard");
-          }}
-          className="col-span-2 group bg-white p-4 rounded-[2rem] border-2 border-slate-200 shadow-xl hover:border-indigo-600 hover:shadow-2xl transition-all flex flex-col items-center gap-3 active:scale-95 py-8"
-        >
-          <div className="bg-emerald-100 p-4 rounded-2xl text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-            <Play className="w-8 h-8 fill-current" />
+      <div className="w-full max-w-2xl space-y-10">
+        
+        {/* SECTION 1: LÍNEAS */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 px-2">
+            <div className="h-px flex-1 bg-slate-100"></div>
+            <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Gestión de Líneas</h2>
+            <div className="h-px flex-1 bg-slate-100"></div>
           </div>
-          <span className="font-black text-lg uppercase tracking-tighter text-center">Pon en práctica</span>
-          <p className="text-slate-400 font-bold text-[10px] text-center hidden sm:block">Entrena tu memoria y domina las rutas.</p>
-        </button>
 
-        <button
-          onClick={() => setScreen("failures")}
-          className="group bg-white p-4 rounded-[2rem] border-2 border-slate-200 shadow-xl hover:border-violet-600 hover:shadow-2xl transition-all flex flex-col items-center gap-3 active:scale-95 py-8"
-        >
-          <div className="bg-violet-100 p-4 rounded-2xl text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors">
-            <Trophy className="w-8 h-8" />
-          </div>
-          <span className="font-black text-lg uppercase tracking-tighter text-center">Progreso</span>
-          <p className="text-slate-400 font-bold text-[10px] text-center hidden sm:block">Rutas completadas (Difícil).</p>
-        </button>
-
-        <button
-          onClick={() => {
-            setScreen("errors");
-          }}
-          className="group bg-white p-4 rounded-[2rem] border-2 border-slate-200 shadow-xl hover:border-rose-600 hover:shadow-2xl transition-all flex flex-col items-center gap-3 active:scale-95 py-8"
-        >
-          <div className="bg-rose-100 p-4 rounded-2xl text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
-            <AlertTriangle className="w-8 h-8" />
-          </div>
-          <span className="font-black text-lg uppercase tracking-tighter text-center">Errores</span>
-          <p className="text-slate-400 font-bold text-[10px] text-center hidden sm:block">Ranking de fallos y línea.</p>
-        </button>
-
-        {/* QUIZ SECTION CARD */}
-        <div className="col-span-2 bg-indigo-50/50 rounded-[2.5rem] p-6 border-2 border-dashed border-indigo-200">
-           <div className="flex items-center gap-4 mb-6">
-              <div className="bg-indigo-600 p-3 rounded-2xl text-white shadow-lg">
-                <Brain className="w-6 h-6" />
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              onClick={() => {
+                setScreen("setup");
+                setGameStatus("setup");
+                setGameMode("standard");
+              }}
+              className="col-span-2 group relative overflow-hidden bg-gradient-to-br from-emerald-500 to-emerald-700 p-8 rounded-[2.5rem] shadow-xl hover:shadow-2xl transition-all active:scale-[0.98] border-b-8 border-emerald-900/30"
+            >
+              <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+                <Play className="w-24 h-24 text-white fill-current" />
               </div>
-              <div className="text-left">
-                <h3 className="font-black text-slate-800 uppercase tracking-tight">Cuestionarios</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{ALL_EXAMS.length} Exámenes disponibles</p>
+              <div className="relative flex items-center gap-6">
+                 <div className="bg-white/20 p-4 rounded-2xl text-white backdrop-blur-sm border border-white/20">
+                   <Play className="w-8 h-8 fill-current" />
+                 </div>
+                 <div className="text-left">
+                    <span className="block font-black text-2xl text-white uppercase tracking-tighter">Pon en práctica</span>
+                    <span className="text-white/70 font-bold text-xs uppercase tracking-widest">Entrena tu memoria</span>
+                 </div>
               </div>
-           </div>
-           
-           <div className="grid grid-cols-2 gap-4">
-              <button
-                onClick={() => startQuiz("random")}
-                className="bg-white p-4 rounded-3xl border-2 border-slate-200 hover:border-indigo-500 hover:shadow-lg transition-all flex flex-col items-center gap-2 group"
-              >
-                <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                  <Play className="w-5 h-5 fill-current" />
-                </div>
-                <span className="font-black text-[10px] uppercase tracking-tighter">Hacer Test</span>
-              </button>
+            </button>
 
-              <button
-                onClick={() => startQuiz("errors")}
-                className={`p-4 rounded-3xl border-2 transition-all flex flex-col items-center gap-2 group relative ${
-                  failedQuizQuestions.length >= 20 
-                  ? "bg-white border-amber-200 hover:border-amber-500 hover:shadow-lg" 
-                  : "bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed"
-                }`}
-                disabled={failedQuizQuestions.length < 20}
-              >
-                {failedQuizQuestions.length >= 20 && (
-                  <span className="absolute -top-2 -right-2 bg-rose-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shadow-lg">
-                    {Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)}
-                  </span>
-                )}
-                <div className={`p-2 rounded-xl transition-colors ${
-                  failedQuizQuestions.length >= 20 ? "bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
-                }`}>
-                  <RotateCcw className="w-5 h-5" />
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className="font-black text-[10px] uppercase tracking-tighter">Tests Errores</span>
-                  <span className="text-[8px] font-bold text-slate-400 uppercase">{failedQuizQuestions.length < 20 ? `Min. 20 (${failedQuizQuestions.length}/20)` : `${Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)} disponibles`}</span>
-                </div>
-              </button>
-           </div>
+            <button
+              onClick={() => setScreen("failures")}
+              className="group bg-white p-6 rounded-[2rem] border-2 border-slate-100 shadow-md hover:border-violet-600 hover:shadow-xl transition-all flex flex-col items-center gap-3 text-center"
+            >
+              <div className="bg-violet-100 p-4 rounded-2xl text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors">
+                <Trophy className="w-6 h-6" />
+              </div>
+              <span className="font-black text-xs uppercase tracking-widest text-slate-800">Progreso</span>
+            </button>
+
+            <button
+              onClick={() => setScreen("errors")}
+              className="group bg-white p-6 rounded-[2rem] border-2 border-slate-100 shadow-md hover:border-rose-600 hover:shadow-xl transition-all flex flex-col items-center gap-3 text-center"
+            >
+              <div className="bg-rose-100 p-4 rounded-2xl text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <span className="font-black text-xs uppercase tracking-widest text-slate-800">Errores</span>
+            </button>
+          </div>
         </div>
+
+        {/* SECTION 2: CUESTIONARIOS */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 px-2">
+            <div className="h-px flex-1 bg-slate-100"></div>
+            <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Preparación Examen</h2>
+            <div className="h-px flex-1 bg-slate-100"></div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            <button
+              onClick={() => startQuiz("random")}
+              className="group relative overflow-hidden bg-white p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-md hover:border-indigo-600 hover:shadow-xl transition-all text-left flex items-center gap-6"
+            >
+               <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:rotate-12 transition-transform">
+                  <Brain className="w-24 h-24" />
+               </div>
+               <div className="bg-indigo-100 p-4 rounded-2xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                 <FileText className="w-8 h-8" />
+               </div>
+               <div>
+                  <h3 className="font-black text-2xl text-slate-800 uppercase tracking-tighter">Hacer Test</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">{ALL_EXAMS.length + ALL_SIMULACROS.length} Pruebas disponibles</p>
+               </div>
+            </button>
+
+            <button
+              onClick={() => startQuiz("errors")}
+              disabled={failedQuizQuestions.length < 20}
+              className={`group relative overflow-hidden p-8 rounded-[2.5rem] border-2 transition-all text-left flex items-center gap-6 ${
+                failedQuizQuestions.length >= 20 
+                ? "bg-white border-slate-100 shadow-md hover:border-amber-600 hover:shadow-xl" 
+                : "bg-slate-50 border-slate-100 opacity-60 grayscale cursor-not-allowed"
+              }`}
+            >
+               {failedQuizQuestions.length >= 20 && (
+                <div className="absolute top-4 right-4 bg-rose-500 text-white w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shadow-lg animate-bounce">
+                  {Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)}
+                </div>
+               )}
+               <div className={`p-4 rounded-2xl transition-colors ${
+                 failedQuizQuestions.length >= 20 ? "bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
+               }`}>
+                 <RotateCcw className="w-8 h-8" />
+               </div>
+               <div>
+                  <h3 className={`font-black text-2xl uppercase tracking-tighter ${failedQuizQuestions.length >= 20 ? "text-slate-800" : "text-slate-400"}`}>Test de Errores</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
+                    {failedQuizQuestions.length < 20 ? `Mínimo 20 errores (${failedQuizQuestions.length}/20)` : `${Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)} Repasos pendientes`}
+                  </p>
+               </div>
+            </button>
+          </div>
+        </div>
+
       </div>
     </div>
   );
@@ -1084,12 +1175,33 @@ const App: React.FC = () => {
           </div>
 
           <div className="mb-8">
-            <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider mb-4 inline-block">
-              {quizType === "random" ? (selectedExam?.examen || "Test Aleatorio") : "Repaso de Errores"}
-            </span>
-            {selectedExam && (
-               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{selectedExam.temario}</p>
-            )}
+            <div className="flex justify-between items-start gap-4 mb-4">
+                <div>
+                  <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 inline-block">
+                    {quizType === "random" ? (selectedExam?.examen || "Test Aleatorio") : "Repaso de Errores"}
+                  </span>
+                  {quizQuestionSuccessStreaks[Number(currentQ.id)] !== undefined && (
+                    <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 ml-2 inline-block border border-amber-200">
+                      Maestría: {quizQuestionSuccessStreaks[Number(currentQ.id)]} / 8
+                    </span>
+                  )}
+                  {selectedExam && (
+                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{selectedExam.temario}</p>
+                  )}
+               </div>
+               <button
+                  onClick={() => setIsDoubtful(!isDoubtful)}
+                  disabled={selectedAnswer !== null}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-2xl border-2 transition-all shrink-0 ${
+                    isDoubtful 
+                    ? "bg-amber-100 border-amber-500 text-amber-700 font-black shadow-inner" 
+                    : "bg-white border-slate-200 text-slate-400 font-bold hover:border-amber-300 hover:text-amber-500"
+                  }`}
+                >
+                  <HelpCircle className={`w-4 h-4 ${isDoubtful ? "fill-amber-500" : ""}`} />
+                  <span className="text-[10px] uppercase tracking-widest hidden sm:inline">Tengo duda</span>
+                </button>
+            </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-800 leading-tight">
               {currentQ.enunciado}
             </h2>
@@ -1163,6 +1275,31 @@ const App: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* BOTÓN GENERAR ALEATORIO */}
+          <button
+            onClick={startRandomCategoryQuiz}
+            className="group bg-indigo-600 p-6 rounded-[2.5rem] border-2 border-indigo-500 hover:shadow-2xl transition-all text-left flex flex-col gap-4 relative overflow-hidden text-white"
+          >
+             <div className="absolute top-0 right-0 p-6 opacity-20 group-hover:rotate-12 transition-transform">
+                <Sparkles className="w-24 h-24" />
+             </div>
+             <div className="bg-white/20 w-12 h-12 rounded-2xl flex items-center justify-center text-white ring-4 ring-white/10">
+                <Sparkles className="w-6 h-6" />
+             </div>
+             <div>
+                <h3 className="text-xl font-black uppercase tracking-tight mb-1">
+                    {quizCategory === "exams" ? "Generar Test Aleatorio" : "Generar Simulacro Aleatorio"}
+                </h3>
+                <p className="text-xs font-bold text-white/70 leading-relaxed max-w-[200px]">
+                    Mezcla preguntas de todos los {quizCategory === "exams" ? "temas" : "simulacros"} disponibles.
+                </p>
+             </div>
+             <div className="flex items-center gap-1 mt-auto text-white/50 group-hover:text-white transition-colors">
+                <span className="text-[10px] font-black uppercase tracking-widest">Crear Nuevo</span>
+                <ChevronRight className="w-4 h-4" />
+             </div>
+          </button>
+
           {list.map((exam) => (
             <button
               key={exam.id}
