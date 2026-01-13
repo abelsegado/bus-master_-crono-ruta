@@ -31,6 +31,8 @@ import {
   Mail,
   LogIn,
   User,
+  FileText,
+  Layers,
 } from "lucide-react";
 import { GameDirection, RouteData, GameStatus, GameDifficulty, GameMode } from "./types";
 
@@ -46,7 +48,11 @@ const normalizeText = (text: string) => {
     .replace(/\b(avenida|avda|av\.?)\b/g, "av"); // Normalize abbreviations
 };
 
-type Screen = "home" | "setup" | "playing" | "failures" | "errors" | "auth";
+import { ALL_EXAMS } from "./src/data/exams";
+import { ALL_SIMULACROS } from "./src/data/simulacros";
+import { Exam } from "./types";
+
+type Screen = "home" | "setup" | "playing" | "failures" | "errors" | "auth" | "quiz" | "quiz_selection" | "quiz_category_selection";
 
 
 interface Toast {
@@ -57,7 +63,10 @@ interface Toast {
 
 const App: React.FC = () => {
   const [direction, setDirection] = useState<GameDirection>("ida");
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<any>(() => {
+    const saved = localStorage.getItem("bus_master_session");
+    return saved ? JSON.parse(saved) : null;
+  });
   const [loading, setLoading] = useState(true);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -68,14 +77,33 @@ const App: React.FC = () => {
 
   // Supabase User Identity
   const [userId, setUserId] = useState<string>(() => {
-    return localStorage.getItem("bus_master_user_id") || crypto.randomUUID();
+    // 1. Prioridad: Sesión guardada
+    const savedSession = localStorage.getItem("bus_master_session");
+    if (savedSession) {
+      try {
+        const parsed = JSON.parse(savedSession);
+        if (parsed?.user?.id) return parsed.user.id;
+      } catch (e) {}
+    }
+    // 2. ID Anónimo guardado
+    return localStorage.getItem("bus_master_anonymous_id") || crypto.randomUUID();
   });
 
   useEffect(() => {
-    if (!localStorage.getItem("bus_master_user_id")) {
-      localStorage.setItem("bus_master_user_id", userId);
+    // Si no estamos logueados, guardamos este como el ID anónimo
+    if (!session) {
+      localStorage.setItem("bus_master_anonymous_id", userId);
     }
-  }, [userId]);
+    localStorage.setItem("bus_master_user_id", userId);
+  }, [userId, session]);
+
+  useEffect(() => {
+    if (session) {
+      localStorage.setItem("bus_master_session", JSON.stringify(session));
+    } else {
+      localStorage.removeItem("bus_master_session");
+    }
+  }, [session]);
 
   // Auth Subscription
   useEffect(() => {
@@ -87,16 +115,36 @@ const App: React.FC = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session?.user) setUserId(session.user.id);
-      else {
-        // Handle logout: Reset to local ID
-        const localId = localStorage.getItem("bus_master_user_id") || crypto.randomUUID();
-        setUserId(localId);
+      if (session?.user) {
+        setUserId(session.user.id);
+      } else {
+        // Al cerrar sesión, LIMPIAMOS TODO EL PROGRESO
+        resetLocalState();
+        const anonId = crypto.randomUUID();
+        setUserId(anonId);
+        localStorage.setItem("bus_master_anonymous_id", anonId);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const resetLocalState = () => {
+    setCompletedRoutes([]);
+    setFailedRoutes({});
+    setRouteAttempts({});
+    setCrowns({});
+    setFailedQuizQuestions([]);
+    setQuizHighScores({});
+    // Limpiar localStorage de datos de usuario
+    localStorage.removeItem("bus_master_completed_hard");
+    localStorage.removeItem("bus_master_failures");
+    localStorage.removeItem("bus_master_attempts");
+    localStorage.removeItem("bus_master_crowns");
+    localStorage.removeItem("bus_master_quiz_errors");
+    localStorage.removeItem("bus_master_quiz_high_scores");
+    localStorage.removeItem("bus_master_session");
+  };
 
   useEffect(() => {
     if (session?.user) {
@@ -178,6 +226,25 @@ const App: React.FC = () => {
   const [currentFailures, setCurrentFailures] = useState<number>(0); // Session failures
   const [toasts, setToasts] = useState<Toast[]>([]); // Stacking feedback
 
+  // Quiz State
+  const [quizType, setQuizType] = useState<"random" | "errors">("random");
+  const [quizCategory, setQuizCategory] = useState<"exams" | "simulacros" | null>(null);
+  const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
+  const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
+  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
+  const [quizScore, setQuizScore] = useState({ correct: 0, total: 0 });
+  const [quizFinished, setQuizFinished] = useState(false);
+  const [failedQuizQuestions, setFailedQuizQuestions] = useState<number[]>(() => {
+    const saved = localStorage.getItem("bus_master_quiz_errors");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+  const [showExplanation, setShowExplanation] = useState(false);
+  const [quizHighScores, setQuizHighScores] = useState<Record<string, { correct: number, total: number }>>(() => {
+    const saved = localStorage.getItem("bus_master_quiz_high_scores");
+    return saved ? JSON.parse(saved) : {};
+  });
+
   // Customization & Persistence
   const [isEditing, setIsEditing] = useState(false);
   const [completedRoutes, setCompletedRoutes] = useState<string[]>(() => {
@@ -254,6 +321,14 @@ const App: React.FC = () => {
     localStorage.setItem("bus_master_crowns", JSON.stringify(crowns));
   }, [crowns]);
 
+  useEffect(() => {
+    localStorage.setItem("bus_master_quiz_errors", JSON.stringify(failedQuizQuestions));
+  }, [failedQuizQuestions]);
+
+  useEffect(() => {
+    localStorage.setItem("bus_master_quiz_high_scores", JSON.stringify(quizHighScores));
+  }, [quizHighScores]);
+
   // Cloud Sync Logic
   const loadOnlineProgress = useCallback(async () => {
     try {
@@ -268,6 +343,8 @@ const App: React.FC = () => {
         if (data.failed_routes) setFailedRoutes(data.failed_routes);
         if (data.route_attempts) setRouteAttempts(data.route_attempts);
         if (data.crowns) setCrowns(data.crowns);
+        if (data.failed_quiz_questions) setFailedQuizQuestions(data.failed_quiz_questions);
+        if (data.quiz_high_scores) setQuizHighScores(data.quiz_high_scores);
         if (data.line_order && data.line_order.length > 0) {
           // Update uniqueLines if order is stored
           const linesMap = new Map<string, string>();
@@ -286,22 +363,27 @@ const App: React.FC = () => {
   }, [userId]);
 
   const saveOnlineProgress = useCallback(async () => {
+    if (!session || !userId) return; // SOLO guarda si hay sesión activa
     try {
       await supabase
         .from('user_progress')
         .upsert({
           user_id: userId,
+          user_email: session?.user?.email || null,
           completed_routes: completedRoutes,
           failed_routes: failedRoutes,
           route_attempts: routeAttempts,
           crowns: crowns,
           line_order: uniqueLines.map(l => l.id),
+          failed_quiz_questions: failedQuizQuestions,
+          quiz_high_scores: quizHighScores,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
+      // console.log("Progreso guardado en la nube correctamente");
     } catch (e) {
       console.error("Error saving progress to Supabase:", e);
     }
-  }, [userId, completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines]);
+  }, [userId, session, completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores]);
 
   // Initial load from cloud
   useEffect(() => {
@@ -314,7 +396,7 @@ const App: React.FC = () => {
       saveOnlineProgress();
     }, 3000); // 3 second debounce
     return () => clearTimeout(timer);
-  }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, saveOnlineProgress]);
+  }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, saveOnlineProgress]);
 
 
   const markCompleted = (routeId: string) => {
@@ -337,6 +419,89 @@ const App: React.FC = () => {
       ...prev,
       [routeId]: (prev[routeId] || 0) + 1
     }));
+  };
+
+  const startQuiz = (type: "random" | "errors", exam?: Exam) => {
+    let questions = [];
+    if (type === "random") {
+      if (!exam) {
+        setScreen("quiz_category_selection");
+        return;
+      }
+      setSelectedExam(exam);
+      questions = [...exam.preguntas].sort(() => Math.random() - 0.5);
+    } else {
+      // For errors, we look across ALL exams and simulacros for failed IDs
+      const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS].flatMap(e => e.preguntas);
+      const allErrors = allQuestions.filter(q => failedQuizQuestions.includes(Number(q.id)));
+      
+      if (allErrors.length < 20) {
+        alert("No tienes suficientes errores para un test de repaso (mínimo 20).");
+        return;
+      }
+      setSelectedExam(null); // It's a mixed error test
+      // Take 20 random errors
+      questions = allErrors.sort(() => Math.random() - 0.5).slice(0, 20);
+    }
+    
+    setQuizType(type);
+    setQuizQuestions(questions);
+    setCurrentQuizIndex(0);
+    setQuizScore({ correct: 0, total: questions.length });
+    setQuizFinished(false);
+    setSelectedAnswer(null);
+    setShowExplanation(false);
+    setScreen("quiz");
+  };
+
+  const handleQuizAnswer = (answer: string) => {
+    if (selectedAnswer !== null) return;
+    
+    setSelectedAnswer(answer);
+    const currentQ = quizQuestions[currentQuizIndex];
+    const userAnsBase = answer.split(')')[0].trim().toLowerCase();
+    const isCorrect = userAnsBase === currentQ.respuesta.toLowerCase();
+
+    if (isCorrect) {
+      playSound("success");
+      setQuizScore(prev => ({ ...prev, correct: prev.correct + 1 }));
+      if (quizType === "errors") {
+        setFailedQuizQuestions(prev => prev.filter(id => id !== Number(currentQ.id)));
+      }
+    } else {
+      playSound("error");
+      setFailedQuizQuestions(prev => {
+        if (prev.includes(Number(currentQ.id))) return prev;
+        return [...prev, Number(currentQ.id)];
+      });
+    }
+
+    setShowExplanation(true);
+    
+    setTimeout(() => {
+      if (currentQuizIndex < quizQuestions.length - 1) {
+        setCurrentQuizIndex(prev => prev + 1);
+        setSelectedAnswer(null);
+        setShowExplanation(false);
+      } else {
+        setQuizFinished(true);
+        if (selectedExam) {
+          setQuizScore(finalScore => {
+            setQuizHighScores(prev => {
+              const prevBest = prev[selectedExam.id]?.correct || 0;
+              if (finalScore.correct > prevBest) {
+                return {
+                  ...prev,
+                  [selectedExam.id]: { correct: finalScore.correct, total: finalScore.total }
+                };
+              }
+              return prev;
+            });
+            return finalScore;
+          });
+        }
+      }
+    }, 2000);
   };
 
   // Sound Synth
@@ -596,7 +761,9 @@ const App: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setScreen("errors")}
+          onClick={() => {
+            setScreen("errors");
+          }}
           className="group bg-white p-4 rounded-[2rem] border-2 border-slate-200 shadow-xl hover:border-rose-600 hover:shadow-2xl transition-all flex flex-col items-center gap-3 active:scale-95 py-8"
         >
           <div className="bg-rose-100 p-4 rounded-2xl text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
@@ -605,6 +772,56 @@ const App: React.FC = () => {
           <span className="font-black text-lg uppercase tracking-tighter text-center">Errores</span>
           <p className="text-slate-400 font-bold text-[10px] text-center hidden sm:block">Ranking de fallos y línea.</p>
         </button>
+
+        {/* QUIZ SECTION CARD */}
+        <div className="col-span-2 bg-indigo-50/50 rounded-[2.5rem] p-6 border-2 border-dashed border-indigo-200">
+           <div className="flex items-center gap-4 mb-6">
+              <div className="bg-indigo-600 p-3 rounded-2xl text-white shadow-lg">
+                <Brain className="w-6 h-6" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-black text-slate-800 uppercase tracking-tight">Cuestionarios</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{ALL_EXAMS.length} Exámenes disponibles</p>
+              </div>
+           </div>
+           
+           <div className="grid grid-cols-2 gap-4">
+              <button
+                onClick={() => startQuiz("random")}
+                className="bg-white p-4 rounded-3xl border-2 border-slate-200 hover:border-indigo-500 hover:shadow-lg transition-all flex flex-col items-center gap-2 group"
+              >
+                <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                  <Play className="w-5 h-5 fill-current" />
+                </div>
+                <span className="font-black text-[10px] uppercase tracking-tighter">Hacer Test</span>
+              </button>
+
+              <button
+                onClick={() => startQuiz("errors")}
+                className={`p-4 rounded-3xl border-2 transition-all flex flex-col items-center gap-2 group relative ${
+                  failedQuizQuestions.length >= 20 
+                  ? "bg-white border-amber-200 hover:border-amber-500 hover:shadow-lg" 
+                  : "bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed"
+                }`}
+                disabled={failedQuizQuestions.length < 20}
+              >
+                {failedQuizQuestions.length >= 20 && (
+                  <span className="absolute -top-2 -right-2 bg-rose-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shadow-lg">
+                    {Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)}
+                  </span>
+                )}
+                <div className={`p-2 rounded-xl transition-colors ${
+                  failedQuizQuestions.length >= 20 ? "bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
+                }`}>
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="font-black text-[10px] uppercase tracking-tighter">Tests Errores</span>
+                  <span className="text-[8px] font-bold text-slate-400 uppercase">{failedQuizQuestions.length < 20 ? `Min. 20 (${failedQuizQuestions.length}/20)` : `${Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)} disponibles`}</span>
+                </div>
+              </button>
+           </div>
+        </div>
       </div>
     </div>
   );
@@ -806,6 +1023,268 @@ const App: React.FC = () => {
            </div>
         </div>
       )
+  };
+
+  const renderQuiz = () => {
+    if (quizFinished) {
+      return (
+        <div className="max-w-md mx-auto py-12 px-6 animate-in zoom-in-95 duration-500">
+          <div className="bg-white rounded-[3rem] shadow-2xl p-8 border-2 border-slate-100 text-center">
+            <div className={`w-20 h-20 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 shadow-2xl rotate-12 ${
+              quizScore.correct / quizScore.total >= 0.5 ? "bg-emerald-500" : "bg-rose-500"
+            }`}>
+              {quizScore.correct / quizScore.total >= 0.5 ? <Trophy className="w-10 h-10 text-white" /> : <XCircle className="w-10 h-10 text-white" />}
+            </div>
+            <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter mb-2">¡Test Finalizado!</h2>
+            <p className="text-slate-400 font-bold mb-8">
+              Has acertado <span className="text-indigo-600">{quizScore.correct}</span> de <span className="text-slate-600">{quizScore.total}</span> preguntas.
+            </p>
+            
+            <div className="space-y-3">
+              <button
+                onClick={() => startQuiz(quizType, selectedExam || undefined)}
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-sm tracking-widest hover:bg-indigo-700 transition-all shadow-lg"
+              >
+                Reintentar Test
+              </button>
+              <button
+                onClick={() => setScreen("home")}
+                className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase text-sm tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Volver al Inicio
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const currentQ = quizQuestions[currentQuizIndex];
+    if (!currentQ) return null;
+
+    return (
+      <div className="max-w-2xl mx-auto py-8 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="mb-8 flex items-center justify-between">
+          <button onClick={() => setScreen("home")} className="p-3 rounded-2xl bg-white border-2 border-slate-200 text-slate-400 hover:text-slate-600 transition-all shadow-sm">
+            <X className="w-6 h-6" />
+          </button>
+          <div className="flex flex-col items-end">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pregunta</span>
+            <span className="text-xl font-black text-indigo-600 tabular-nums">{currentQuizIndex + 1} / {quizQuestions.length}</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 border-2 border-slate-100 relative overflow-hidden">
+          {/* Progress Bar */}
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-slate-100">
+            <div 
+              className="h-full bg-indigo-500 transition-all duration-500" 
+              style={{ width: `${((currentQuizIndex + 1) / quizQuestions.length) * 100}%` }}
+            />
+          </div>
+
+          <div className="mb-8">
+            <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider mb-4 inline-block">
+              {quizType === "random" ? (selectedExam?.examen || "Test Aleatorio") : "Repaso de Errores"}
+            </span>
+            {selectedExam && (
+               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{selectedExam.temario}</p>
+            )}
+            <h2 className="text-xl sm:text-2xl font-black text-slate-800 leading-tight">
+              {currentQ.enunciado}
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {currentQ.opciones.map((opcion, idx) => {
+              const letter = opcion.split(')')[0].trim().toLowerCase();
+              const isSelected = selectedAnswer === opcion;
+              const isCorrect = letter === currentQ.respuesta.toLowerCase();
+              
+              let buttonClass = "bg-white border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/30";
+              if (selectedAnswer) {
+                if (isCorrect) buttonClass = "bg-emerald-50 border-emerald-500 text-emerald-700 ring-4 ring-emerald-50";
+                else if (isSelected) buttonClass = "bg-rose-50 border-rose-500 text-rose-700 ring-4 ring-rose-50";
+                else buttonClass = "bg-white border-slate-100 text-slate-300 opacity-50";
+              }
+
+              return (
+                <button
+                  key={idx}
+                  onClick={() => handleQuizAnswer(opcion)}
+                  disabled={selectedAnswer !== null}
+                  className={`w-full text-left p-5 rounded-2xl border-2 font-bold transition-all flex items-center gap-4 ${buttonClass}`}
+                >
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-black text-xs ${
+                    isSelected ? "bg-current text-white" : "bg-slate-100 text-slate-400"
+                  }`}>
+                    {letter.toUpperCase()}
+                  </span>
+                  <span className="flex-1">{opcion.substring(opcion.indexOf(')') + 1).trim()}</span>
+                  {selectedAnswer && isCorrect && <CheckCircle className="w-5 h-5 text-emerald-500" />}
+                  {selectedAnswer && isSelected && !isCorrect && <XCircle className="w-5 h-5 text-rose-500" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {showExplanation && (
+            <div className="mt-8 p-4 bg-indigo-50 rounded-2xl border-2 border-indigo-100 animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center gap-2 mb-1 text-indigo-600">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Respuesta Correcta</span>
+              </div>
+              <p className="font-bold text-slate-700">
+                La respuesta correcta es la <span className="text-indigo-600 uppercase font-black">{currentQ.respuesta}</span>.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderQuizSelection = () => {
+    const list = quizCategory === "exams" ? ALL_EXAMS : ALL_SIMULACROS;
+    return (
+      <div className="max-w-4xl mx-auto py-8 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="flex items-center gap-4 mb-8">
+          <button onClick={() => setScreen("quiz_category_selection")} className="bg-white p-3 rounded-2xl border-2 border-slate-200 text-slate-400 hover:text-slate-600 shadow-sm transition-all">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <div>
+            <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">
+              {quizCategory === "exams" ? "Seleccionar Examen" : "Seleccionar Simulacro"}
+            </h2>
+            <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">
+              {quizCategory === "exams" ? "Elige el temario que quieres practicar" : "Pon a prueba tus conocimientos finales"}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {list.map((exam) => (
+            <button
+              key={exam.id}
+              onClick={() => startQuiz("random", exam)}
+              className="group bg-white p-6 rounded-[2.5rem] border-2 border-slate-100 hover:border-indigo-600 hover:shadow-2xl transition-all text-left flex flex-col gap-4 relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+                <Brain className="w-24 h-24" />
+              </div>
+              
+              <div className="bg-indigo-50 w-12 h-12 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                <FileText className="w-6 h-6" />
+              </div>
+
+              <div>
+                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight mb-1">{exam.examen}</h3>
+                <p className="text-xs font-bold text-slate-500 leading-relaxed">{exam.temario}</p>
+              </div>
+
+              <div className="flex items-center justify-between mt-auto pt-4 border-t border-slate-50">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                    {exam.preguntas.length} Preguntas
+                  </span>
+                  {quizHighScores[exam.id] !== undefined && (
+                    <span className="text-[9px] font-bold text-emerald-600 uppercase">
+                      Mejor Nota: {quizHighScores[exam.id].correct} / {quizHighScores[exam.id].total}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 text-slate-400 group-hover:text-indigo-600 transition-colors">
+                  <span className="text-[10px] font-black uppercase tracking-widest">Empezar</span>
+                  <ChevronRight className="w-4 h-4" />
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderQuizCategorySelection = () => {
+    return (
+      <div className="max-w-4xl mx-auto py-8 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="flex items-center gap-4 mb-8">
+          <button onClick={() => setScreen("home")} className="bg-white p-3 rounded-2xl border-2 border-slate-200 text-slate-400 hover:text-slate-600 shadow-sm transition-all">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <div>
+            <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">Categorías de Test</h2>
+            <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">
+              Elige el tipo de preparación que prefieres
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <button
+            onClick={() => {
+              setQuizCategory("exams");
+              setScreen("quiz_selection");
+            }}
+            className="group bg-white p-8 rounded-[3rem] border-2 border-slate-100 hover:border-indigo-600 hover:shadow-2xl transition-all text-left flex flex-col gap-6 relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+              <FileText className="w-32 h-32" />
+            </div>
+            
+            <div className="bg-indigo-50 w-16 h-16 rounded-[1.5rem] flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+              <FileText className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-2">Exámenes por Temas</h3>
+              <p className="text-sm font-bold text-slate-500 leading-relaxed">Práctica preguntas específicas de cada bloque del temario.</p>
+            </div>
+
+            <div className="flex items-center justify-between mt-auto pt-6 border-t border-slate-50">
+              <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">
+                {ALL_EXAMS.length} Bloques disponibles
+              </span>
+              <div className="flex items-center gap-1 text-slate-400 group-hover:text-indigo-600 transition-colors">
+                <span className="text-xs font-black uppercase tracking-widest">Ver Todos</span>
+                <ChevronRight className="w-5 h-5" />
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => {
+              setQuizCategory("simulacros");
+              setScreen("quiz_selection");
+            }}
+            className="group bg-white p-8 rounded-[3rem] border-2 border-slate-100 hover:border-amber-600 hover:shadow-2xl transition-all text-left flex flex-col gap-6 relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+              <Layers className="w-32 h-32" />
+            </div>
+            
+            <div className="bg-amber-50 w-16 h-16 rounded-[1.5rem] flex items-center justify-center text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+              <Layers className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-2">Simulacros Oficiales</h3>
+              <p className="text-sm font-bold text-slate-500 leading-relaxed">Exámenes completos mezclados para simular la prueba real.</p>
+            </div>
+
+            <div className="flex items-center justify-between mt-auto pt-6 border-t border-slate-50">
+              <span className="text-xs font-black text-amber-600 uppercase tracking-widest">
+                {ALL_SIMULACROS.length} Simulacros listos
+              </span>
+              <div className="flex items-center gap-1 text-slate-400 group-hover:text-amber-600 transition-colors">
+                <span className="text-xs font-black uppercase tracking-widest">Empezar</span>
+                <ChevronRight className="w-5 h-5" />
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
   };
 
   const renderAuth = () => (
@@ -1650,6 +2129,9 @@ const App: React.FC = () => {
         {screen === "errors" && renderErrors()}
         {screen === "auth" && renderAuth()}
         {screen === "playing" && renderGame()}
+        {screen === "quiz" && renderQuiz()}
+        {screen === "quiz_selection" && renderQuizSelection()}
+        {screen === "quiz_category_selection" && renderQuizCategorySelection()}
       </main>
 
       {screen === "playing" && (

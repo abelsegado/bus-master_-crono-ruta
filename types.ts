@@ -26,3 +26,22 @@ export interface GameState {
 export type GameDifficulty = 'normal' | 'hard' | 'study';
 
 export type GameMode = 'standard' | 'study';
+
+export interface Question {
+  id: string | number; // String for namespaced IDs if needed, or number
+  enunciado: string;
+  opciones: string[];
+  respuesta: string; // 'a', 'b', 'c', 'd'
+}
+
+export interface Exam {
+  id: string;
+  examen: string;
+  temario: string;
+  preguntas: Question[];
+}
+
+export interface QuizProgress {
+  failedQuestions: number[]; // List of question IDs
+  lastExamDate?: string;
+}
