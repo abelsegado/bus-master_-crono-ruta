@@ -51,10 +51,11 @@ const normalizeText = (text: string) => {
 };
 
 import { ALL_EXAMS } from "./src/data/exams";
+import { EXAMENES_2025 } from "./src/data/examen_2025";
 import { ALL_SIMULACROS } from "./src/data/simulacros";
 import { Exam } from "./types";
 
-type Screen = "home" | "setup" | "playing" | "failures" | "errors" | "auth" | "quiz" | "quiz_selection" | "quiz_category_selection";
+type Screen = "home" | "setup" | "playing" | "failures" | "errors" | "auth" | "quiz" | "quiz_selection" | "quiz_category_selection" | "examen_2025_selection";
 
 
 interface Toast {
@@ -137,6 +138,7 @@ const App: React.FC = () => {
     setRouteAttempts({});
     setCrowns({});
     setFailedQuizQuestions([]);
+    setBlankQuizQuestions([]);
     setQuizHighScores({});
     // Limpiar localStorage de datos de usuario
     localStorage.removeItem("bus_master_completed_hard");
@@ -229,7 +231,7 @@ const App: React.FC = () => {
   const [toasts, setToasts] = useState<Toast[]>([]); // Stacking feedback
 
   // Quiz State
-  const [quizType, setQuizType] = useState<"random" | "errors">("random");
+  const [quizType, setQuizType] = useState<"random" | "errors" | "dudas">("random");
   const [quizCategory, setQuizCategory] = useState<"exams" | "simulacros" | null>(null);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
@@ -251,6 +253,55 @@ const App: React.FC = () => {
     const saved = localStorage.getItem("bus_master_quiz_streaks");
     return saved ? JSON.parse(saved) : {};
   });
+  const [blankQuizQuestions, setBlankQuizQuestions] = useState<number[]>(() => {
+    const saved = localStorage.getItem("bus_master_quiz_blanks");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [userAnswers, setUserAnswers] = useState<Record<number, string | null>>({});
+
+  // Resume Logic
+  const [resumeDialog, setResumeDialog] = useState<{ visible: boolean; exam: Exam | null; type: "random" | "errors" | "dudas" }>({ visible: false, exam: null, type: "random" });
+
+  const saveQuizProgress = (examId: string, progress: any) => {
+    const allProgress = JSON.parse(localStorage.getItem("bus_master_quiz_progress_v2") || "{}");
+    allProgress[examId] = {
+      ...progress,
+      timestamp: new Date().toISOString()
+    };
+    localStorage.setItem("bus_master_quiz_progress_v2", JSON.stringify(allProgress));
+  };
+
+  const clearQuizProgress = (examId: string) => {
+    const allProgress = JSON.parse(localStorage.getItem("bus_master_quiz_progress_v2") || "{}");
+    delete allProgress[examId];
+    localStorage.setItem("bus_master_quiz_progress_v2", JSON.stringify(allProgress));
+  };
+
+  const getQuizProgress = (examId: string) => {
+    const allProgress = JSON.parse(localStorage.getItem("bus_master_quiz_progress_v2") || "{}");
+    return allProgress[examId];
+  };
+
+  useEffect(() => {
+    if (screen === 'quiz' && !quizFinished && quizQuestions.length > 0) {
+       const examId = selectedExam?.id || `temp-${quizType}`; 
+       // Only save if it's a real exam structure or sufficient context
+       saveQuizProgress(examId, {
+         questions: quizQuestions,
+         currentIndex: currentQuizIndex,
+         score: quizScore,
+         answers: userAnswers,
+         selectedAnswer,
+         showExplanation,
+         isDoubtful,
+         quizType,
+         selectedExam // Save exam metadata too
+       });
+    } else if (screen === 'quiz' && quizFinished) {
+       const examId = selectedExam?.id || `temp-${quizType}`;
+       clearQuizProgress(examId);
+    }
+  }, [screen, quizQuestions, currentQuizIndex, quizScore, userAnswers, selectedAnswer, showExplanation, isDoubtful, quizFinished, selectedExam, quizType]);
 
   // Customization & Persistence
   const [isEditing, setIsEditing] = useState(false);
@@ -335,6 +386,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("bus_master_quiz_high_scores", JSON.stringify(quizHighScores));
   }, [quizHighScores]);
+
+  useEffect(() => {
+    localStorage.setItem("bus_master_quiz_blanks", JSON.stringify(blankQuizQuestions));
+  }, [blankQuizQuestions]);
 
   useEffect(() => {
     localStorage.setItem("bus_master_quiz_streaks", JSON.stringify(quizQuestionSuccessStreaks));
@@ -434,7 +489,16 @@ const App: React.FC = () => {
     }));
   };
 
-  const startQuiz = (type: "random" | "errors", exam?: Exam) => {
+  const startQuiz = (type: "random" | "errors" | "dudas", exam?: Exam, forceStart: boolean = false) => {
+    // Check for saved progress first
+    if (!forceStart && type === "random" && exam) {
+      const saved = getQuizProgress(exam.id);
+      if (saved && !saved.finished) { // Assuming we don't save finished ones or clearer clears them
+        setResumeDialog({ visible: true, exam, type });
+        return;
+      }
+    }
+
     let questions = [];
     if (type === "random") {
       if (!exam) {
@@ -442,19 +506,35 @@ const App: React.FC = () => {
         return;
       }
       setSelectedExam(exam);
-      questions = [...exam.preguntas].sort(() => Math.random() - 0.5);
-    } else {
-      // For errors, we look across ALL exams and simulacros for failed IDs
-      const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS].flatMap(e => e.preguntas);
-      const allErrors = allQuestions.filter(q => failedQuizQuestions.includes(Number(q.id)));
+      questions = [...exam.preguntas]
+        .filter(q => !q.enunciado.toUpperCase().includes("IMPUGNADA"))
+        .sort(() => Math.random() - 0.5);
+    } else if (type === "errors") {
+      const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS, ...EXAMENES_2025].flatMap(e => e.preguntas);
+      const allErrors = allQuestions.filter(q => 
+        failedQuizQuestions.includes(Number(q.id)) && 
+        !q.enunciado.toUpperCase().includes("IMPUGNADA")
+      );
       
       if (allErrors.length < 20) {
         alert("No tienes suficientes errores para un test de repaso (mínimo 20).");
         return;
       }
-      setSelectedExam(null); // It's a mixed error test
-      // Take 20 random errors
+      setSelectedExam(null);
       questions = allErrors.sort(() => Math.random() - 0.5).slice(0, 20);
+    } else if (type === "dudas") {
+      const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS, ...EXAMENES_2025].flatMap(e => e.preguntas);
+      const allDudas = allQuestions.filter(q => 
+        blankQuizQuestions.includes(Number(q.id)) && 
+        !q.enunciado.toUpperCase().includes("IMPUGNADA")
+      );
+      
+      if (allDudas.length < 5) {
+        alert("No tienes suficientes dudas para un test de repaso (mínimo 5).");
+        return;
+      }
+      setSelectedExam(null);
+      questions = allDudas.sort(() => Math.random() - 0.5).slice(0, Math.min(20, allDudas.length));
     }
     
     setQuizType(type);
@@ -465,7 +545,28 @@ const App: React.FC = () => {
     setSelectedAnswer(null);
     setShowExplanation(false);
     setIsDoubtful(false);
+    setUserAnswers({});
     setScreen("quiz");
+  };
+
+  const resumeQuiz = () => {
+    const { exam, type } = resumeDialog;
+    if (!exam) return;
+    const saved = getQuizProgress(exam.id);
+    if (saved) {
+      setQuizType(saved.quizType);
+      setSelectedExam(saved.selectedExam);
+      setQuizQuestions(saved.questions);
+      setCurrentQuizIndex(saved.currentIndex);
+      setQuizScore(saved.score);
+      setUserAnswers(saved.answers);
+      setSelectedAnswer(saved.selectedAnswer);
+      setShowExplanation(saved.showExplanation);
+      setIsDoubtful(saved.isDoubtful);
+      setQuizFinished(false);
+      setScreen("quiz");
+    }
+    setResumeDialog({ visible: false, exam: null, type: "random" });
   };
 
   const startRandomCategoryQuiz = () => {
@@ -495,22 +596,24 @@ const App: React.FC = () => {
     const isCorrect = userAnsBase === currentQ.respuesta.toLowerCase();
 
     const qId = Number(currentQ.id);
+    
+    // Guardar respuesta en la sesión
+    setUserAnswers(prev => ({ ...prev, [currentQuizIndex]: answer }));
+    
+    // Si se contesta (bien o mal), deja de ser una "duda" pendiente
+    setBlankQuizQuestions(prev => prev.filter(id => id !== qId));
 
     if (isCorrect) {
       playSound("success");
       setQuizScore(prev => ({ ...prev, correct: prev.correct + 1 }));
       
       if (isDoubtful) {
-        // MODO MAESTRÍA ACTIVADO (por pulsar "Tengo Duda")
-        // Reiniciamos racha y aseguramos que esté en fallos
         setQuizQuestionSuccessStreaks(prev => ({ ...prev, [qId]: 0 }));
         setFailedQuizQuestions(prev => prev.includes(qId) ? prev : [...prev, qId]);
       } else {
-        // Acierto sin duda:
         const hasStreak = quizQuestionSuccessStreaks[qId] !== undefined;
         
         if (hasStreak) {
-          // Si estaba en modo maestría, incrementamos racha
           setQuizQuestionSuccessStreaks(prev => {
             const currentStreak = (prev[qId] || 0) + 1;
             if (currentStreak >= 8) {
@@ -521,13 +624,11 @@ const App: React.FC = () => {
             return { ...prev, [qId]: currentStreak };
           });
         } else if (failedQuizQuestions.includes(qId)) {
-          // Si era un fallo normal (sin racha), se borra al primer acierto
           setFailedQuizQuestions(old => old.filter(id => id !== qId));
         }
       }
     } else {
       playSound("error");
-      // Fallo: añadimos a fallos y si ya tenía racha, la reiniciamos
       if (quizQuestionSuccessStreaks[qId] !== undefined) {
         setQuizQuestionSuccessStreaks(prev => ({ ...prev, [qId]: 0 }));
       }
@@ -541,29 +642,53 @@ const App: React.FC = () => {
     
     setTimeout(() => {
       if (currentQuizIndex < quizQuestions.length - 1) {
-        setCurrentQuizIndex(prev => prev + 1);
-        setSelectedAnswer(null);
-        setShowExplanation(false);
+        const nextIdx = currentQuizIndex + 1;
+        setCurrentQuizIndex(nextIdx);
+        setSelectedAnswer(userAnswers[nextIdx] || null);
+        setShowExplanation(userAnswers[nextIdx] !== null);
         setIsDoubtful(false);
       } else {
-        setQuizFinished(true);
-        if (selectedExam) {
-          setQuizScore(finalScore => {
-            setQuizHighScores(prev => {
-              const prevBest = prev[selectedExam.id]?.correct || 0;
-              if (finalScore.correct > prevBest) {
-                return {
-                  ...prev,
-                  [selectedExam.id]: { correct: finalScore.correct, total: finalScore.total }
-                };
-              }
-              return prev;
-            });
-            return finalScore;
-          });
-        }
+        finishQuiz();
       }
     }, 2000);
+  };
+
+  const finishQuiz = () => {
+    setQuizFinished(true);
+    
+    // Calcular nota final con penalización: un fallo resta un acierto
+    let corrects = 0;
+    let errors = 0;
+    
+    quizQuestions.forEach((q, idx) => {
+        const ans = userAnswers[idx];
+        if (ans) {
+            const userAnsBase = ans.split(')')[0].trim().toLowerCase();
+            if (userAnsBase === q.respuesta.toLowerCase()) {
+                corrects++;
+            } else {
+                errors++;
+            }
+        }
+    });
+
+    const finalCorrect = Math.max(0, corrects - errors);
+    const finalScore = { correct: finalCorrect, total: quizQuestions.length };
+    
+    setQuizScore(finalScore);
+
+    if (selectedExam) {
+      setQuizHighScores(prev => {
+        const prevBest = prev[selectedExam.id]?.correct || 0;
+        if (finalCorrect > prevBest) {
+          return {
+            ...prev,
+            [selectedExam.id]: finalScore
+          };
+        }
+        return prev;
+      });
+    }
   };
 
   // Sound Synth
@@ -910,7 +1035,54 @@ const App: React.FC = () => {
                   </p>
                </div>
             </button>
+
+            <button
+              onClick={() => startQuiz("dudas")}
+              disabled={blankQuizQuestions.length < 5}
+              className={`group relative overflow-hidden p-8 rounded-[2.5rem] border-2 transition-all text-left flex items-center gap-6 ${
+                blankQuizQuestions.length >= 5 
+                ? "bg-white border-slate-100 shadow-md hover:border-violet-600 hover:shadow-xl" 
+                : "bg-slate-50 border-slate-100 opacity-60 grayscale cursor-not-allowed"
+              }`}
+            >
+               <div className={`p-4 rounded-2xl transition-colors ${
+                 blankQuizQuestions.length >= 5 ? "bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
+               }`}>
+                 <HelpCircle className="w-8 h-8" />
+               </div>
+               <div>
+                  <h3 className={`font-black text-2xl uppercase tracking-tighter ${blankQuizQuestions.length >= 5 ? "text-slate-800" : "text-slate-400"}`}>Test de Dudas</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
+                    {blankQuizQuestions.length < 5 ? `Mínimo 5 dudas (${blankQuizQuestions.length}/5)` : `${blankQuizQuestions.length} Preguntas sin contestar`}
+                  </p>
+               </div>
+            </button>
           </div>
+        </div>
+
+        {/* SECTION 3: EXAMEN 2025 */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 px-2">
+            <div className="h-px flex-1 bg-slate-100"></div>
+            <h2 className="text-[10px] font-black text-rose-400 uppercase tracking-[0.4em]">Promoción 2025</h2>
+            <div className="h-px flex-1 bg-slate-100"></div>
+          </div>
+          
+          <button
+              onClick={() => setScreen("examen_2025_selection")}
+              className="w-full group relative overflow-hidden bg-rose-600 p-8 rounded-[2.5rem] shadow-xl hover:shadow-2xl transition-all text-left flex items-center gap-6"
+            >
+               <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:rotate-12 transition-transform">
+                  <Flag className="w-24 h-24 text-white" />
+               </div>
+               <div className="bg-white/20 p-4 rounded-2xl text-white backdrop-blur-sm border border-white/20">
+                 <Flag className="w-8 h-8 fill-current" />
+               </div>
+               <div>
+                  <h3 className="font-black text-2xl text-white uppercase tracking-tighter">Tests Oficiales 2025</h3>
+                  <p className="text-[10px] font-bold text-rose-200 uppercase tracking-[0.2em]">Líneas, Igualdad y Ordenanzas</p>
+               </div>
+          </button>
         </div>
 
       </div>
@@ -1128,7 +1300,9 @@ const App: React.FC = () => {
             </div>
             <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter mb-2">¡Test Finalizado!</h2>
             <p className="text-slate-400 font-bold mb-8">
-              Has acertado <span className="text-indigo-600">{quizScore.correct}</span> de <span className="text-slate-600">{quizScore.total}</span> preguntas.
+              Nota final: <span className="text-indigo-600">{quizScore.correct}</span> de <span className="text-slate-600">{quizScore.total}</span>.
+              <br/>
+              <span className="text-[10px] uppercase tracking-widest text-slate-400 mt-2 block">(Cada error resta un acierto)</span>
             </p>
             
             <div className="space-y-3">
@@ -1251,6 +1425,59 @@ const App: React.FC = () => {
               </p>
             </div>
           )}
+
+          {/* Botones de Navegación */}
+          <div className="flex gap-4 mt-8 pt-6 border-t border-slate-100">
+            <button
+              onClick={() => {
+                if (currentQuizIndex > 0) {
+                  const prevIdx = currentQuizIndex - 1;
+                  setCurrentQuizIndex(prevIdx);
+                  setSelectedAnswer(userAnswers[prevIdx] || null);
+                  setShowExplanation(userAnswers[prevIdx] !== null);
+                  setIsDoubtful(false);
+                }
+              }}
+              disabled={currentQuizIndex === 0}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black uppercase text-xs tracking-widest transition-all ${
+                currentQuizIndex === 0 
+                ? "bg-slate-50 text-slate-300 cursor-not-allowed" 
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              <ChevronLeft className="w-4 h-4" /> Anterior
+            </button>
+
+            <button
+              onClick={() => {
+                const qId = Number(currentQ.id);
+                // Si no hay respuesta seleccionada, marcar como duda
+                if (selectedAnswer === null) {
+                  setBlankQuizQuestions(prev => prev.includes(qId) ? prev : [...prev, qId]);
+                }
+
+                if (currentQuizIndex < quizQuestions.length - 1) {
+                  const nextIdx = currentQuizIndex + 1;
+                  setCurrentQuizIndex(nextIdx);
+                  setSelectedAnswer(userAnswers[nextIdx] || null);
+                  setShowExplanation(userAnswers[nextIdx] !== null);
+                  setIsDoubtful(false);
+                } else {
+                  finishQuiz();
+                }
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black uppercase text-xs tracking-widest transition-all ${
+                selectedAnswer === null 
+                ? "bg-amber-100 text-amber-700 hover:bg-amber-200 border-2 border-amber-200" 
+                : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg"
+              }`}
+            >
+              {currentQuizIndex < quizQuestions.length - 1 
+                ? (selectedAnswer === null ? "Saltar" : "Siguiente") 
+                : "Finalizar"} 
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1419,6 +1646,78 @@ const App: React.FC = () => {
               </div>
             </div>
           </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderExamen2025Selection = () => {
+    return (
+      <div className="max-w-4xl mx-auto py-8 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="flex items-center gap-4 mb-8">
+          <button onClick={() => setScreen("home")} className="bg-white p-3 rounded-2xl border-2 border-slate-200 text-slate-400 hover:text-slate-600 shadow-sm transition-all">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <div>
+            <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">Exámenes 2025</h2>
+            <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">
+              Material específico para la promoción interna
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {EXAMENES_2025.map((exam) => {
+            const saved = getQuizProgress(exam.id);
+            const hasProgress = saved && !saved.finished;
+            
+            return (
+              <button
+                key={exam.id}
+                onClick={() => startQuiz("random", exam)}
+                className="group bg-white p-6 rounded-[2.5rem] border-2 border-slate-100 hover:border-rose-600 hover:shadow-2xl transition-all text-left flex flex-col gap-4 relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <Brain className="w-24 h-24" />
+                </div>
+                
+                <div className="bg-rose-50 w-12 h-12 rounded-2xl flex items-center justify-center text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                  <FileText className="w-6 h-6" />
+                </div>
+
+                <div>
+                  <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight mb-1">{exam.examen}</h3>
+                  <p className="text-xs font-bold text-slate-500 leading-relaxed">{exam.temario}</p>
+                </div>
+
+                <div className="mt-auto pt-4 border-t border-slate-50 w-full">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest">
+                      {exam.preguntas.length} Preguntas
+                    </span>
+                    {hasProgress && (
+                      <span className="text-[9px] font-black bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded uppercase">
+                        En curso
+                      </span>
+                    )}
+                  </div>
+                  
+                  {quizHighScores[exam.id] !== undefined && (
+                    <div className="text-[9px] font-bold text-emerald-600 uppercase mb-2">
+                      Récord: {quizHighScores[exam.id].correct} / {quizHighScores[exam.id].total}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1 text-slate-400 group-hover:text-rose-600 transition-colors justify-end">
+                    <span className="text-[10px] font-black uppercase tracking-widest">
+                      {hasProgress ? "Continuar" : "Empezar"}
+                    </span>
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
@@ -2260,15 +2559,19 @@ const App: React.FC = () => {
       </header>
 
       <main className="max-w-5xl mx-auto px-4">
-        {screen === "home" && renderHome()}
-        {screen === "setup" && renderSetup()}
-        {screen === "failures" && renderProgress()}
-        {screen === "errors" && renderErrors()}
-        {screen === "auth" && renderAuth()}
-        {screen === "playing" && renderGame()}
-        {screen === "quiz" && renderQuiz()}
-        {screen === "quiz_selection" && renderQuizSelection()}
-        {screen === "quiz_category_selection" && renderQuizCategorySelection()}
+        {(() => {
+          if (screen === "home") return renderHome();
+          if (screen === "setup") return renderSetup();
+          if (screen === "failures") return renderProgress();
+          if (screen === "errors") return renderErrors();
+          if (screen === "auth") return renderAuth();
+          if (screen === "playing") return renderGame();
+          if (screen === "quiz") return renderQuiz();
+          if (screen === "quiz_selection") return renderQuizSelection();
+          if (screen === "quiz_category_selection") return renderQuizCategorySelection();
+          if (screen === "examen_2025_selection") return renderExamen2025Selection();
+          return renderHome();
+        })()}
       </main>
 
       {screen === "playing" && (
@@ -2288,6 +2591,31 @@ const App: React.FC = () => {
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 20px; border: 2px solid #f1f5f9; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}</style>
+      {resumeDialog.visible && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-xl font-black text-slate-800 mb-2">¡Test en curso detectado!</h3>
+            <p className="text-slate-500 text-sm mb-6">Hemos encontrado un test guardado de <strong>{resumeDialog.exam?.examen}</strong> que no has terminado. ¿Qué quieres hacer?</p>
+            <div className="space-y-3">
+              <button 
+                onClick={resumeQuiz}
+                className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black uppercase text-xs tracking-widest hover:bg-indigo-700 transition-all"
+              >
+                Continuar donde lo dejé
+              </button>
+              <button 
+                onClick={() => {
+                  setResumeDialog({ ...resumeDialog, visible: false });
+                  startQuiz(resumeDialog.type, resumeDialog.exam, true); // Force start fresh
+                }}
+                className="w-full py-3 bg-white border-2 border-slate-100 text-slate-600 rounded-xl font-black uppercase text-xs tracking-widest hover:border-rose-200 hover:text-rose-600 transition-all"
+              >
+                Empezar de cero
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
