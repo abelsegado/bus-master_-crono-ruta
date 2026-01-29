@@ -184,23 +184,7 @@ export const testLineas: Exam =   {
     "opciones": ["a) Lorenza Correa.", "b) Emilio Díaz.", "c) Emilio Thuiller-La Fuente.", "d) Fray Domingo Pimentel."],
     "respuesta": "a"
   },
-  {
-    "id": 25,
-    "enunciado": "¿Cuáles son las cabeceras (primeras paradas en ambos sentidos) de la línea E (70)?",
-    "opciones": [
-      "a) Paseo del Parque-Plaza del General Torrijos y Maqueda.",
-      "b) Paseo del Parque - Plaza del General Torrijos y Santa Rosalía-Loma del Campo",
-      "c) Alameda Principal y Maqueda.",
-      "d) Santa Rosalía y Loma del Campo"
-    ],
-    "respuesta": null
-  },
-  {
-    "id": 26,
-    "enunciado": "¿Cuántas paradas tiene la línea 20 en sentido ida, en Cmno. de los Prados?",
-    "opciones": ["a) 1 parada.", "b) 3 paradas.", "c) 4 paradas.", "d) 2 paradas."],
-    "respuesta": null
-  },
+  
   {
     "id": 27,
     "enunciado": "¿Cuántas paradas tiene la línea 20 en total en Paseo del Parque?",
@@ -266,12 +250,6 @@ export const testLineas: Exam =   {
     "respuesta": "c"
   },
   {
-    "id": 36,
-    "enunciado": "¿Cuántas paradas tiene la línea \"Parque Litoral-Alameda Principal-Carlinda\" en sentido ida?",
-    "opciones": ["a) Línea 33.", "b) Línea 35.", "c) Línea 36.", "d) Línea 34."],
-    "respuesta": null
-  },
-  {
     "id": 37,
     "enunciado": "¿Cuántas paradas tiene en total la línea C2 (72) en Paseo del Parque?",
     "opciones": ["a) 1 parada.", "b) 2 paradas.", "c) 3 paradas.", "d) 4 paradas."],
@@ -289,22 +267,10 @@ export const testLineas: Exam =   {
     "respuesta": "b"
   },
   {
-    "id": 39,
-    "enunciado": "¿Cuántas líneas de la EMT paran en la parada 205 \"Huerto de los Claveles\"?",
-    "opciones": ["a) 3", "b) 1", "c) 4", "d) 2"],
-    "respuesta": null
-  },
-  {
     "id": 40,
     "enunciado": "¿Cuántas paradas realiza la línea 20, sentido vuelta, en calle \"La Unión\"?",
     "opciones": ["a) 2", "b) 4", "c) 5", "d) 3"],
     "respuesta": "b"
-  },
-  {
-    "id": 41,
-    "enunciado": "En la parada Emilio Díaz ¿cuántas líneas tienen parada?",
-    "opciones": ["a) 1 línea.", "b) 2 líneas.", "c) 3 líneas.", "d) Ninguna."],
-    "respuesta": null
   },
   {
     "id": 42,
@@ -942,12 +908,6 @@ export const testLineas: Exam =   {
     "respuesta": "d"
   },
   {
-    "id": 147,
-    "enunciado": "¿Cuántas paradas tiene la Línea A (75) en Av. de Velázquez sentido ida?",
-    "opciones": ["a) 2", "b) 3", "c) 4", "d) 5"],
-    "respuesta": "c"
-  },
-  {
     "id": 148,
     "enunciado": "¿En cuál de estas paradas se puede hacer transbordo entre las líneas 31 y 23?",
     "opciones": ["a) \"Armengual de la Mota\"", "b) \"Hilera - Santa Elena\"", "c) \"Paseo del Parque - Ayuntamiento\"", "d) \"Paseo del Parque – Plaza de la Marina\""],
@@ -1428,12 +1388,6 @@ export const testLineas: Exam =   {
     "respuesta": "a"
   },
   {
-    "id": 229,
-    "enunciado": "Si estoy en Armengual de la Mota y quiero ir hacia el centro de la ciudad debo coger:",
-    "opciones": ["a) Un autobús de la línea 18, 21,23 o 38", "b) Un autobús de la línea 2, 17 o 30", "c) Un autobús de cualquiera de las líneas de las respuestas a) y b)", "d) La respuesta correcta es la c) más la línea N2 (42)"],
-    "respuesta": "d"
-  },
-  {
     "id": 230,
     "enunciado": "Si estoy en Armengual de la Mota y quiero ir a Las Chapas debo coger",
     "opciones": ["a) Un autobús de cualquiera de las líneas 8, 21,23 o 38", "b) Un autobús de la línea 2, 17 o 30", "c) Cualquiera de las líneas de las respuestas a y b", "d) La respuesta correcta es la c) más la línea N2 (42)"],
@@ -1455,7 +1409,7 @@ export const testLineas: Exam =   {
     "id": 233,
     "enunciado": "Si estoy en Calle Cuarteles y quiero ir al Paseo del Parque puedo coger:",
     "opciones": ["a) La línea 1, la 3, la 5, la 7, la 9, la 10, la C2 (72) y la N1 (41)", "b) La línea 1, la 3, la C2 (72) y la N1 (41)", "c) La C1 (71)", "d) La respuesta a) más la línea 27"],
-    "respuesta": "a"
+    "respuesta": "c"
   },
   {
     "id": 234,
@@ -1626,12 +1580,6 @@ export const testLineas: Exam =   {
     "respuesta": "a"
   },
   {
-    "id": 266,
-    "enunciado": "¿Cuántas paradas tiene la Línea A (75) en Héroe de Sostoa sentido Aeropuerto (Ida)?",
-    "opciones": ["a) 2", "b) 3", "c) 4", "d) 5"],
-    "respuesta": null
-  },
-  {
     "id": 267,
     "enunciado": "Me encuentro en la parada \"Pilar del Prado\" ¿Qué líneas coinciden en dicha parada?",
     "opciones": ["a) Líneas 19, N3 (43), 25", "b) Líneas 19, 28, 25", "c) Líneas 25, 28", "d) Líneas 19, 28, 25, N3 (43)"],
@@ -1731,7 +1679,7 @@ export const testLineas: Exam =   {
     "id": 283,
     "enunciado": "¿Qué líneas de la EMT tienen parada en \"San Juan Bosco - Albéniz\"?",
     "opciones": ["a) N2 (42)", "b) 30", "c) 1", "d) Las respuestas a) y c) son válidas"],
-    "respuesta": "c"
+    "respuesta": "d"
   },
   {
     "id": 284,
@@ -1755,12 +1703,6 @@ export const testLineas: Exam =   {
     "id": 287,
     "enunciado": "¿Cuál es la quinta parada de la línea 33 dirección Av. Andalucía (sentido vuelta)?",
     "opciones": ["a) La cerrajera-Rotonda.", "b) Olmos.", "c) Olmos–Interpares.", "d) La cerrajera."],
-    "respuesta": "c"
-  },
-  {
-    "id": 288,
-    "enunciado": "Nos montamos en Luis Barahona Soto-Santa Paula y bajamos en Málaga Oloroso. La combinación es:",
-    "opciones": ["a) Líneas 25, 4 y 2.", "b) Líneas 23, 22 y 7.", "c) Líneas 7 y 20.", "d) Líneas 15 y 4."],
     "respuesta": "c"
   },
   {
@@ -1846,12 +1788,6 @@ export const testLineas: Exam =   {
     "enunciado": "¿Desde qué parada y hasta qué parada coinciden la línea 3 y la 11 sentido ida?",
     "opciones": ["a) Desde calle cuarteles hasta calle Bolivia.", "b) Desde Paseo del Parque hasta Playa Virginia.", "c) Desde Alameda Principal - Sur hasta Carretera Almería-Padre Coloma.", "d) Desde Las Acacias hasta Plaza Manuel Azaña."],
     "respuesta": "c"
-  },
-  {
-    "id": 303,
-    "enunciado": "¿Cuál es la siguiente parada de la línea 11, sentido vuelta, después de parar en “Paseo del Parque - Ayuntamiento”?",
-    "opciones": ["a) Alameda principal - Norte", "b) Paseo del Parque - Plaza del General Torrijos", "c) Paseo de Reding - Keromnes", "d) Paseo de Reding - Plaza de Toros."],
-    "respuesta": null
   },
   {
     "id": 304,

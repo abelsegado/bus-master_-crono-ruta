@@ -35,6 +35,7 @@ import {
   Layers,
   Sparkles,
   HelpCircle,
+  Save,
 } from "lucide-react";
 import { GameDirection, RouteData, GameStatus, GameDifficulty, GameMode } from "./types";
 
@@ -66,6 +67,7 @@ interface Toast {
 
 const App: React.FC = () => {
   const [direction, setDirection] = useState<GameDirection>("ida");
+  const [showExitDialog, setShowExitDialog] = useState(false);
   const [session, setSession] = useState<any>(() => {
     const saved = localStorage.getItem("bus_master_session");
     return saved ? JSON.parse(saved) : null;
@@ -262,24 +264,36 @@ const App: React.FC = () => {
   // Resume Logic
   const [resumeDialog, setResumeDialog] = useState<{ visible: boolean; exam: Exam | null; type: "random" | "errors" | "dudas" }>({ visible: false, exam: null, type: "random" });
 
+  const [quizProgress, setQuizProgress] = useState<Record<string, any>>(() => {
+    const saved = localStorage.getItem("bus_master_quiz_progress_v2");
+    return saved ? JSON.parse(saved) : {};
+  });
+
   const saveQuizProgress = (examId: string, progress: any) => {
-    const allProgress = JSON.parse(localStorage.getItem("bus_master_quiz_progress_v2") || "{}");
-    allProgress[examId] = {
-      ...progress,
-      timestamp: new Date().toISOString()
-    };
-    localStorage.setItem("bus_master_quiz_progress_v2", JSON.stringify(allProgress));
+    setQuizProgress(prev => {
+      const newProgress = {
+        ...prev,
+        [examId]: {
+          ...progress,
+          timestamp: new Date().toISOString()
+        }
+      };
+      localStorage.setItem("bus_master_quiz_progress_v2", JSON.stringify(newProgress));
+      return newProgress;
+    });
   };
 
   const clearQuizProgress = (examId: string) => {
-    const allProgress = JSON.parse(localStorage.getItem("bus_master_quiz_progress_v2") || "{}");
-    delete allProgress[examId];
-    localStorage.setItem("bus_master_quiz_progress_v2", JSON.stringify(allProgress));
+    setQuizProgress(prev => {
+      const newProgress = { ...prev };
+      delete newProgress[examId];
+      localStorage.setItem("bus_master_quiz_progress_v2", JSON.stringify(newProgress));
+      return newProgress;
+    });
   };
 
   const getQuizProgress = (examId: string) => {
-    const allProgress = JSON.parse(localStorage.getItem("bus_master_quiz_progress_v2") || "{}");
-    return allProgress[examId];
+    return quizProgress[examId];
   };
 
   useEffect(() => {
@@ -412,6 +426,8 @@ const App: React.FC = () => {
         if (data.failed_quiz_questions) setFailedQuizQuestions(data.failed_quiz_questions);
         if (data.quiz_high_scores) setQuizHighScores(data.quiz_high_scores);
         if (data.quiz_question_success_streaks) setQuizQuestionSuccessStreaks(data.quiz_question_success_streaks);
+        if (data.blank_quiz_questions) setBlankQuizQuestions(data.blank_quiz_questions);
+        if (data.quiz_progress) setQuizProgress(data.quiz_progress);
         if (data.line_order && data.line_order.length > 0) {
           // Update uniqueLines if order is stored
           const linesMap = new Map<string, string>();
@@ -445,13 +461,15 @@ const App: React.FC = () => {
           failed_quiz_questions: failedQuizQuestions,
           quiz_high_scores: quizHighScores,
           quiz_question_success_streaks: quizQuestionSuccessStreaks,
+          blank_quiz_questions: blankQuizQuestions,
+          quiz_progress: quizProgress,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
       // console.log("Progreso guardado en la nube correctamente");
     } catch (e) {
       console.error("Error saving progress to Supabase:", e);
     }
-  }, [userId, session, completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, quizQuestionSuccessStreaks]);
+  }, [userId, session, completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, quizQuestionSuccessStreaks, blankQuizQuestions, quizProgress]);
 
   // Initial load from cloud
   useEffect(() => {
@@ -464,7 +482,7 @@ const App: React.FC = () => {
       saveOnlineProgress();
     }, 3000); // 3 second debounce
     return () => clearTimeout(timer);
-  }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, quizQuestionSuccessStreaks, saveOnlineProgress]);
+  }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, quizQuestionSuccessStreaks, blankQuizQuestions, quizProgress, saveOnlineProgress]);
 
 
   const markCompleted = (routeId: string) => {
@@ -491,11 +509,19 @@ const App: React.FC = () => {
 
   const startQuiz = (type: "random" | "errors" | "dudas", exam?: Exam, forceStart: boolean = false) => {
     // Check for saved progress first
-    if (!forceStart && type === "random" && exam) {
-      const saved = getQuizProgress(exam.id);
-      if (saved && !saved.finished) { // Assuming we don't save finished ones or clearer clears them
-        setResumeDialog({ visible: true, exam, type });
-        return;
+    // Check for saved progress first
+    if (!forceStart) {
+      let saveId = null;
+      if (type === "random" && exam) saveId = exam.id;
+      else if (type === "errors") saveId = "temp-errors";
+      else if (type === "dudas") saveId = "temp-dudas";
+      
+      if (saveId) {
+        const saved = getQuizProgress(saveId);
+        if (saved && !saved.finished) {
+          setResumeDialog({ visible: true, exam: exam || saved.selectedExam, type });
+          return;
+        }
       }
     }
 
@@ -608,7 +634,9 @@ const App: React.FC = () => {
       setQuizScore(prev => ({ ...prev, correct: prev.correct + 1 }));
       
       if (isDoubtful) {
-        setQuizQuestionSuccessStreaks(prev => ({ ...prev, [qId]: 0 }));
+        if (quizQuestionSuccessStreaks[qId] === undefined) {
+          setQuizQuestionSuccessStreaks(prev => ({ ...prev, [qId]: 0 }));
+        }
         setFailedQuizQuestions(prev => prev.includes(qId) ? prev : [...prev, qId]);
       } else {
         const hasStreak = quizQuestionSuccessStreaks[qId] !== undefined;
@@ -629,9 +657,6 @@ const App: React.FC = () => {
       }
     } else {
       playSound("error");
-      if (quizQuestionSuccessStreaks[qId] !== undefined) {
-        setQuizQuestionSuccessStreaks(prev => ({ ...prev, [qId]: 0 }));
-      }
       setFailedQuizQuestions(prev => {
         if (prev.includes(qId)) return prev;
         return [...prev, qId];
@@ -655,6 +680,16 @@ const App: React.FC = () => {
 
   const finishQuiz = () => {
     setQuizFinished(true);
+    
+    // Clear saved progress
+    let saveId = null;
+    if (quizType === "random" && selectedExam) saveId = selectedExam.id;
+    else if (quizType === "errors") saveId = "temp-errors";
+    else if (quizType === "dudas") saveId = "temp-dudas";
+    
+    if (saveId) {
+        clearQuizProgress(saveId);
+    }
     
     // Calcular nota final con penalización: un fallo resta un acierto
     let corrects = 0;
@@ -1299,11 +1334,39 @@ const App: React.FC = () => {
               {quizScore.correct / quizScore.total >= 0.5 ? <Trophy className="w-10 h-10 text-white" /> : <XCircle className="w-10 h-10 text-white" />}
             </div>
             <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter mb-2">¡Test Finalizado!</h2>
-            <p className="text-slate-400 font-bold mb-8">
-              Nota final: <span className="text-indigo-600">{quizScore.correct}</span> de <span className="text-slate-600">{quizScore.total}</span>.
-              <br/>
-              <span className="text-[10px] uppercase tracking-widest text-slate-400 mt-2 block">(Cada error resta un acierto)</span>
-            </p>
+            <div className="space-y-1 mb-8">
+              <p className="text-slate-600 font-black text-xl">
+                Nota final: <span className="text-indigo-600">{quizScore.correct}</span> de <span className="text-slate-600">{quizScore.total}</span>
+              </p>
+              <div className="flex justify-center gap-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                {(() => {
+                  let corrects = 0;
+                  let errors = 0;
+                  let blanks = 0;
+                  quizQuestions.forEach((q, idx) => {
+                    const ans = userAnswers[idx];
+                    if (ans) {
+                      const userAnsBase = ans.split(')')[0].trim().toLowerCase();
+                      if (userAnsBase === q.respuesta.toLowerCase()) {
+                        corrects++;
+                      } else {
+                        errors++;
+                      }
+                    } else {
+                      blanks++;
+                    }
+                  });
+                  return (
+                    <>
+                      <span className="text-emerald-500">Aciertos: {corrects}</span>
+                      <span className="text-rose-500">Errores: {errors}</span>
+                      <span className="text-slate-400">En blanco: {blanks}</span>
+                    </>
+                  );
+                })()}
+              </div>
+              <p className="text-[10px] uppercase tracking-widest text-slate-400 mt-2 block">(Cada error resta un acierto)</p>
+            </div>
             
             <div className="space-y-3">
               <button
@@ -1330,8 +1393,9 @@ const App: React.FC = () => {
     return (
       <div className="max-w-2xl mx-auto py-8 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="mb-8 flex items-center justify-between">
-          <button onClick={() => setScreen("home")} className="p-3 rounded-2xl bg-white border-2 border-slate-200 text-slate-400 hover:text-slate-600 transition-all shadow-sm">
-            <X className="w-6 h-6" />
+          <button onClick={() => setShowExitDialog(true)} className="p-3 rounded-2xl bg-white border-2 border-slate-200 text-slate-400 hover:text-slate-600 transition-all shadow-sm flex items-center gap-2">
+            <ChevronLeft className="w-6 h-6" />
+            <span className="font-black uppercase text-xs tracking-widest hidden sm:inline">Atrás</span>
           </button>
           <div className="flex flex-col items-end">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pregunta</span>
@@ -1339,7 +1403,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 border-2 border-slate-100 relative overflow-hidden">
+        <div key={currentQ.id} className="bg-white rounded-[2.5rem] shadow-2xl p-8 border-2 border-slate-100 relative overflow-hidden">
           {/* Progress Bar */}
           <div className="absolute top-0 left-0 w-full h-1.5 bg-slate-100">
             <div 
@@ -1365,7 +1429,7 @@ const App: React.FC = () => {
                </div>
                <button
                   onClick={() => setIsDoubtful(!isDoubtful)}
-                  disabled={selectedAnswer !== null}
+                  disabled={!!userAnswers[currentQuizIndex]}
                   className={`flex items-center gap-2 px-4 py-2 rounded-2xl border-2 transition-all shrink-0 ${
                     isDoubtful 
                     ? "bg-amber-100 border-amber-500 text-amber-700 font-black shadow-inner" 
@@ -1384,11 +1448,12 @@ const App: React.FC = () => {
           <div className="grid grid-cols-1 gap-3">
             {currentQ.opciones.map((opcion, idx) => {
               const letter = opcion.split(')')[0].trim().toLowerCase();
-              const isSelected = selectedAnswer === opcion;
+              const currentAnswer = userAnswers[currentQuizIndex];
+              const isSelected = currentAnswer === opcion;
               const isCorrect = letter === currentQ.respuesta.toLowerCase();
               
               let buttonClass = "bg-white border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/30";
-              if (selectedAnswer) {
+              if (currentAnswer) {
                 if (isCorrect) buttonClass = "bg-emerald-50 border-emerald-500 text-emerald-700 ring-4 ring-emerald-50";
                 else if (isSelected) buttonClass = "bg-rose-50 border-rose-500 text-rose-700 ring-4 ring-rose-50";
                 else buttonClass = "bg-white border-slate-100 text-slate-300 opacity-50";
@@ -1398,7 +1463,7 @@ const App: React.FC = () => {
                 <button
                   key={idx}
                   onClick={() => handleQuizAnswer(opcion)}
-                  disabled={selectedAnswer !== null}
+                  disabled={!!currentAnswer}
                   className={`w-full text-left p-5 rounded-2xl border-2 font-bold transition-all flex items-center gap-4 ${buttonClass}`}
                 >
                   <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-black text-xs ${
@@ -1407,24 +1472,14 @@ const App: React.FC = () => {
                     {letter.toUpperCase()}
                   </span>
                   <span className="flex-1">{opcion.substring(opcion.indexOf(')') + 1).trim()}</span>
-                  {selectedAnswer && isCorrect && <CheckCircle className="w-5 h-5 text-emerald-500" />}
-                  {selectedAnswer && isSelected && !isCorrect && <XCircle className="w-5 h-5 text-rose-500" />}
+                  {currentAnswer && isCorrect && <CheckCircle className="w-5 h-5 text-emerald-500" />}
+                  {currentAnswer && isSelected && !isCorrect && <XCircle className="w-5 h-5 text-rose-500" />}
                 </button>
               );
             })}
           </div>
 
-          {showExplanation && (
-            <div className="mt-8 p-4 bg-indigo-50 rounded-2xl border-2 border-indigo-100 animate-in fade-in slide-in-from-top-2">
-              <div className="flex items-center gap-2 mb-1 text-indigo-600">
-                <AlertCircle className="w-4 h-4" />
-                <span className="text-[10px] font-black uppercase tracking-widest">Respuesta Correcta</span>
-              </div>
-              <p className="font-bold text-slate-700">
-                La respuesta correcta es la <span className="text-indigo-600 uppercase font-black">{currentQ.respuesta}</span>.
-              </p>
-            </div>
-          )}
+
 
           {/* Botones de Navegación */}
           <div className="flex gap-4 mt-8 pt-6 border-t border-slate-100">
@@ -1451,8 +1506,9 @@ const App: React.FC = () => {
             <button
               onClick={() => {
                 const qId = Number(currentQ.id);
+                const currentAnswer = userAnswers[currentQuizIndex];
                 // Si no hay respuesta seleccionada, marcar como duda
-                if (selectedAnswer === null) {
+                if (!currentAnswer) {
                   setBlankQuizQuestions(prev => prev.includes(qId) ? prev : [...prev, qId]);
                 }
 
@@ -1467,18 +1523,90 @@ const App: React.FC = () => {
                 }
               }}
               className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black uppercase text-xs tracking-widest transition-all ${
-                selectedAnswer === null 
+                !userAnswers[currentQuizIndex] 
                 ? "bg-amber-100 text-amber-700 hover:bg-amber-200 border-2 border-amber-200" 
                 : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg"
               }`}
             >
               {currentQuizIndex < quizQuestions.length - 1 
-                ? (selectedAnswer === null ? "Saltar" : "Siguiente") 
+                ? (!userAnswers[currentQuizIndex] ? "Saltar" : "Siguiente") 
                 : "Finalizar"} 
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
+        {/* Exit Dialog */}
+          {showExitDialog && (
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+              <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl space-y-6">
+                <div className="text-center space-y-2">
+                  <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto text-indigo-600 mb-4">
+                    <Save className="w-8 h-8" />
+                  </div>
+                  <h3 className="font-black text-2xl text-slate-800 uppercase tracking-tight">¿Guardar Progreso?</h3>
+                  <p className="text-slate-500 font-bold text-sm">
+                    Tienes un test en curso. ¿Quieres guardar tus respuestas para continuar más tarde?
+                  </p>
+                </div>
+                <div className="grid gap-3">
+                  <button 
+                    onClick={() => {
+                        // Force save just in case, though auto-save usually handles it
+                        let saveId = null;
+                        if (quizType === "random" && selectedExam) saveId = selectedExam.id;
+                        else if (quizType === "errors") saveId = "temp-errors";
+                        else if (quizType === "dudas") saveId = "temp-dudas";
+                        
+                        if (saveId) {
+                            saveQuizProgress(saveId, {
+                                quizType,
+                                selectedExam,
+                                questions: quizQuestions,
+                                currentIndex: currentQuizIndex,
+                                score: quizScore,
+                                answers: userAnswers,
+                                selectedAnswer,
+                                showExplanation,
+                                isDoubtful,
+                                finished: false
+                            });
+                        }
+                        setShowExitDialog(false);
+                        setScreen("home");
+                    }}
+                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-indigo-700 transition-all shadow-lg"
+                  >
+                    Guardar y Salir
+                  </button>
+                  <button 
+                    onClick={() => {
+                        // Clear the auto-saved progress because user explicitly chose NOT to save
+                        let saveId = null;
+                        if (quizType === "random" && selectedExam) saveId = selectedExam.id;
+                        else if (quizType === "errors") saveId = "temp-errors";
+                        else if (quizType === "dudas") saveId = "temp-dudas";
+                        
+                        if (saveId) {
+                            clearQuizProgress(saveId);
+                        }
+
+                        setShowExitDialog(false);
+                        setScreen("home");
+                    }}
+                    className="w-full py-4 bg-white border-2 border-slate-200 text-slate-500 rounded-2xl font-black uppercase text-xs tracking-widest hover:border-rose-500 hover:text-rose-500 transition-all"
+                  >
+                    Salir sin guardar
+                  </button>
+                  <button 
+                    onClick={() => setShowExitDialog(false)}
+                    className="w-full py-3 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
       </div>
     );
   };

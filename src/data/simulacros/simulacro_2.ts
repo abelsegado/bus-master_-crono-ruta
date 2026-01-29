@@ -37,12 +37,6 @@ export const simulacro2: Exam = {
       "respuesta": "c"
     },
     {
-      "id": 6,
-      "enunciado": "¿Cuántas paradas realiza la Línea 1 en Av. Europa antes de llegar a la parada “Hermanos Lumiere”?",
-      "opciones": ["a) 8", "b) 6", "c) 5", "d) 7"],
-      "respuesta": "Impugnada"
-    },
-    {
       "id": 7,
       "enunciado": "¿Qué línea/s tienen parada en “Orellana Toledano - San Patricio”?",
       "opciones": ["a) Solo 15", "b) 31, 15", "c) Solo 31", "d) 15, 3"],
@@ -84,12 +78,7 @@ export const simulacro2: Exam = {
       "opciones": ["a) Cristo de la Epidemia - Tejeros", "b) Cristo de la Epidemia – Fuente Olletas", "c) Alameda Capuchinos – El Ejido", "d) a y b Son correctas"],
       "respuesta": "c"
     },
-    {
-      "id": 14,
-      "enunciado": "¿Cuántas paradas realiza la línea 37 en “Cmno. de Colmenar” dirección Av. Andalucía?",
-      "opciones": ["a) 7", "b) 4", "c) 3", "d) 9"],
-      "respuesta": "Impugnada"
-    },
+    
     {
       "id": 15,
       "enunciado": "¿Cuál de estas líneas no para en “La Hoz – Mercado de Huelin”?",
@@ -377,12 +366,6 @@ export const simulacro2: Exam = {
       "respuesta": "b"
     },
     {
-      "id": 61,
-      "enunciado": "Situaciones para continuar el viaje a la mayor brevedad según Art. 85:",
-      "opciones": ["a) Accidentes sin daños", "b) Heridos leves", "c) Heridos graves", "d) a) y b) son correctas"],
-      "respuesta": "Impugnada"
-    },
-    {
       "id": 62,
       "enunciado": "¿Quién tiene régimen de monopolio en Málaga?",
       "opciones": ["a) Ayuntamiento y Alcalde", "b) Excmo. Ayuntamiento", "c) No existe monopolio", "d) El Alcalde-Presidente"],
@@ -568,18 +551,7 @@ export const simulacro2: Exam = {
       "opciones": ["a) Jane Brown-Bruckner", "b) Jane Brown-Borodín", "c) Jane Bowles-Bruckner", "d) Jane Bowles-Borodín"],
       "respuesta": "c"
     },
-    {
-      "id": 93,
-      "enunciado": "Parada nº 19 Línea 14 Teatinos:",
-      "opciones": ["a) Orson Wells", "b) José Ribera", "c) Carril Las Morillas", "d) Carril de la Ribera"],
-      "respuesta": "Impugnada"
-    },
-    {
-      "id": 94,
-      "enunciado": "Parada nº 27 Línea 1 Hermanos Lumière:",
-      "opciones": ["a) La Luz", "b) Vistafranca", "c) San Andrés 2 Fase", "d) Instituto"],
-      "respuesta": "Impugnada"
-    },
+   
     {
       "id": 95,
       "enunciado": "¿Líneas para ir de Periodista J.A. Rando a Ingeniero Torre Acosta?",

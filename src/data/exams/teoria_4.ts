@@ -84,7 +84,7 @@ export const teoria4: Exam = {
     {
       "id": 13,
       "enunciado": "¿Cuántas paradas realiza la línea 32 en su viaje de vuelta?",
-      "opciones": ["a) 19", "b) 20", "c) 22", "d) 23"],
+      "opciones": ["a) 19", "b) 20", "c) 22", "d) 24"],
       "respuesta": "d"
     },
     {

@@ -160,12 +160,8 @@ export const simulacro1: Exam = {
       ],
       "respuesta": "b"
     },
-    {
-      "id": 25,
-      "enunciado": "¿Qué tipos de líneas son las denominadas C1, C2, N3, C5, C6 y C8?",
-      "opciones": ["a) Circulares", "b) Circundantes", "c) Nocturnas", "d) Ninguna de las anteriores"],
-      "respuesta": "Impugnada"
-    },
+    
+    
     {
       "id": 26,
       "enunciado": "Viajo en la Línea 33 dirección Cerrado de Calderón cuando, debido a un contratiempo, tengo que volver a la Alameda Principal. ¿En cuál de éstas paradas puedo bajarme para coger, en la misma parada, alguna línea que me lleve a la Alameda Principal?",
@@ -383,12 +379,7 @@ export const simulacro1: Exam = {
       "opciones": ["a) Únicos o colectivos.", "b) Regulares o discrecionales.", "c) Fijos o discontinuos.", "d) Regulares o irregulares."],
       "respuesta": "b"
     },
-    {
-      "id": 58,
-      "enunciado": "Si un vehículo interrumpe su servicio con motivo de algún incidente, las personas usuarias subirán al siguiente... como se recoge en el artículo:",
-      "opciones": ["a) Artículo 19", "b) Artículo 20", "c) Artículo 21", "d) Artículo 23"],
-      "respuesta": "Impugnada"
-    },
+    
     {
       "id": 59,
       "enunciado": "El pago del viaje se efectuará de acuerdo con la normativa en vigor para cada modalidad de viaje. Este texto pertenece al artículo......",
@@ -610,12 +601,7 @@ export const simulacro1: Exam = {
       "opciones": ["a) EJE 3", "b) EJE 4", "c) EJE 5", "d) Ninguna es correcta"],
       "respuesta": "c" 
     },
-    {
-      "id": 90,
-      "enunciado": "¿De cuántas medidas consta el EJE 5 del III Plan de Igualdad?",
-      "opciones": ["a) 0", "b) 1", "c) 2", "d) 3"],
-      "respuesta": "Impugnada" 
-    },
+    
     {
       "id": 91,
       "enunciado": "La siguiente parada a “Av. Arroyo de los Ángeles – Hospital Materno”, en la Línea 15 dirección Virreina:",
