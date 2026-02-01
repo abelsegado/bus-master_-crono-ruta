@@ -7,4 +7,10 @@ export const EXAMENES_2025: Exam[] = [
   testLineas,
   testIgualdad,
   testOrdenanzas
-];
+].map(exam => ({
+  ...exam,
+  preguntas: exam.preguntas.map(q => ({
+    ...q,
+    id: `${exam.id}-${q.id}`
+  }))
+}));

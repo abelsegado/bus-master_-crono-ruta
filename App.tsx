@@ -56,7 +56,7 @@ import { EXAMENES_2025 } from "./src/data/examen_2025";
 import { ALL_SIMULACROS } from "./src/data/simulacros";
 import { Exam } from "./types";
 
-type Screen = "home" | "setup" | "playing" | "failures" | "errors" | "auth" | "quiz" | "quiz_selection" | "quiz_category_selection" | "examen_2025_selection";
+type Screen = "home" | "setup" | "playing" | "failures" | "errors" | "auth" | "quiz" | "quiz_selection" | "quiz_category_selection" | "examen_2025_selection" | "error_test_selection";
 
 
 interface Toast {
@@ -240,7 +240,7 @@ const App: React.FC = () => {
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
   const [quizScore, setQuizScore] = useState({ correct: 0, total: 0 });
   const [quizFinished, setQuizFinished] = useState(false);
-  const [failedQuizQuestions, setFailedQuizQuestions] = useState<number[]>(() => {
+  const [failedQuizQuestions, setFailedQuizQuestions] = useState<(string | number)[]>(() => {
     const saved = localStorage.getItem("bus_master_quiz_errors");
     return saved ? JSON.parse(saved) : [];
   });
@@ -251,18 +251,19 @@ const App: React.FC = () => {
     const saved = localStorage.getItem("bus_master_quiz_high_scores");
     return saved ? JSON.parse(saved) : {};
   });
-  const [quizQuestionSuccessStreaks, setQuizQuestionSuccessStreaks] = useState<Record<number, number>>(() => {
+  const [quizQuestionSuccessStreaks, setQuizQuestionSuccessStreaks] = useState<Record<string | number, number>>(() => {
     const saved = localStorage.getItem("bus_master_quiz_streaks");
     return saved ? JSON.parse(saved) : {};
   });
-  const [blankQuizQuestions, setBlankQuizQuestions] = useState<number[]>(() => {
+  const [blankQuizQuestions, setBlankQuizQuestions] = useState<(string | number)[]>(() => {
     const saved = localStorage.getItem("bus_master_quiz_blanks");
     return saved ? JSON.parse(saved) : [];
   });
   const [userAnswers, setUserAnswers] = useState<Record<number, string | null>>({});
+  const [selectedErrorTestIndex, setSelectedErrorTestIndex] = useState<number | null>(null);
 
   // Resume Logic
-  const [resumeDialog, setResumeDialog] = useState<{ visible: boolean; exam: Exam | null; type: "random" | "errors" | "dudas" }>({ visible: false, exam: null, type: "random" });
+  const [resumeDialog, setResumeDialog] = useState<{ visible: boolean; exam: Exam | null; type: "random" | "errors" | "dudas"; saveId?: string }>({ visible: false, exam: null, type: "random" });
 
   const [quizProgress, setQuizProgress] = useState<Record<string, any>>(() => {
     const saved = localStorage.getItem("bus_master_quiz_progress_v2");
@@ -298,9 +299,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (screen === 'quiz' && !quizFinished && quizQuestions.length > 0) {
-       const examId = selectedExam?.id || `temp-${quizType}`; 
+       const saveId = selectedExam?.id || (quizType === "errors" && selectedErrorTestIndex !== null ? `temp-errors-${selectedErrorTestIndex}` : `temp-${quizType}`); 
        // Only save if it's a real exam structure or sufficient context
-       saveQuizProgress(examId, {
+       saveQuizProgress(saveId, {
+         quizType,
+         selectedExam,
+         selectedErrorTestIndex,
          questions: quizQuestions,
          currentIndex: currentQuizIndex,
          score: quizScore,
@@ -308,14 +312,13 @@ const App: React.FC = () => {
          selectedAnswer,
          showExplanation,
          isDoubtful,
-         quizType,
-         selectedExam // Save exam metadata too
+         finished: false
        });
     } else if (screen === 'quiz' && quizFinished) {
-       const examId = selectedExam?.id || `temp-${quizType}`;
-       clearQuizProgress(examId);
+       const saveId = selectedExam?.id || (quizType === "errors" && selectedErrorTestIndex !== null ? `temp-errors-${selectedErrorTestIndex}` : `temp-${quizType}`);
+       clearQuizProgress(saveId);
     }
-  }, [screen, quizQuestions, currentQuizIndex, quizScore, userAnswers, selectedAnswer, showExplanation, isDoubtful, quizFinished, selectedExam, quizType]);
+  }, [screen, quizQuestions, currentQuizIndex, quizScore, userAnswers, selectedAnswer, showExplanation, isDoubtful, quizFinished, selectedExam, quizType, selectedErrorTestIndex]);
 
   // Customization & Persistence
   const [isEditing, setIsEditing] = useState(false);
@@ -483,6 +486,21 @@ const App: React.FC = () => {
     }, 3000); // 3 second debounce
     return () => clearTimeout(timer);
   }, [completedRoutes, failedRoutes, routeAttempts, crowns, uniqueLines, failedQuizQuestions, quizHighScores, quizQuestionSuccessStreaks, blankQuizQuestions, quizProgress, saveOnlineProgress]);
+  const allFilteredErrors = useMemo(() => {
+    const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS, ...EXAMENES_2025].flatMap(e => e.preguntas);
+    return allQuestions.filter(q => 
+      failedQuizQuestions.includes(q.id) && 
+      !q.enunciado.toUpperCase().includes("IMPUGNADA")
+    );
+  }, [failedQuizQuestions]);
+
+  const allFilteredDudas = useMemo(() => {
+    const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS, ...EXAMENES_2025].flatMap(e => e.preguntas);
+    return allQuestions.filter(q => 
+      blankQuizQuestions.includes(q.id) && 
+      !q.enunciado.toUpperCase().includes("IMPUGNADA")
+    );
+  }, [blankQuizQuestions]);
 
 
   const markCompleted = (routeId: string) => {
@@ -513,13 +531,18 @@ const App: React.FC = () => {
     if (!forceStart) {
       let saveId = null;
       if (type === "random" && exam) saveId = exam.id;
-      else if (type === "errors") saveId = "temp-errors";
+      else if (type === "errors") {
+        // Since home button doesn't know the index, we check the first one or a "main" one
+        // But clicking Test de Errores now goes to selection screen.
+        // So this startQuiz("errors") is mostly called for the first block.
+        saveId = selectedErrorTestIndex !== null ? `temp-errors-${selectedErrorTestIndex}` : "temp-errors-0";
+      }
       else if (type === "dudas") saveId = "temp-dudas";
       
       if (saveId) {
         const saved = getQuizProgress(saveId);
         if (saved && !saved.finished) {
-          setResumeDialog({ visible: true, exam: exam || saved.selectedExam, type });
+          setResumeDialog({ visible: true, exam: exam || saved.selectedExam, type, saveId });
           return;
         }
       }
@@ -536,31 +559,19 @@ const App: React.FC = () => {
         .filter(q => !q.enunciado.toUpperCase().includes("IMPUGNADA"))
         .sort(() => Math.random() - 0.5);
     } else if (type === "errors") {
-      const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS, ...EXAMENES_2025].flatMap(e => e.preguntas);
-      const allErrors = allQuestions.filter(q => 
-        failedQuizQuestions.includes(Number(q.id)) && 
-        !q.enunciado.toUpperCase().includes("IMPUGNADA")
-      );
-      
-      if (allErrors.length < 20) {
-        alert("No tienes suficientes errores para un test de repaso (mínimo 20).");
+      if (allFilteredErrors.length === 0) {
+        alert("No tienes errores acumulados.");
         return;
       }
       setSelectedExam(null);
-      questions = allErrors.sort(() => Math.random() - 0.5).slice(0, 20);
+      questions = allFilteredErrors.slice(0, 20);
     } else if (type === "dudas") {
-      const allQuestions = [...ALL_EXAMS, ...ALL_SIMULACROS, ...EXAMENES_2025].flatMap(e => e.preguntas);
-      const allDudas = allQuestions.filter(q => 
-        blankQuizQuestions.includes(Number(q.id)) && 
-        !q.enunciado.toUpperCase().includes("IMPUGNADA")
-      );
-      
-      if (allDudas.length < 5) {
+      if (allFilteredDudas.length < 5) {
         alert("No tienes suficientes dudas para un test de repaso (mínimo 5).");
         return;
       }
       setSelectedExam(null);
-      questions = allDudas.sort(() => Math.random() - 0.5).slice(0, Math.min(20, allDudas.length));
+      questions = allFilteredDudas.sort(() => Math.random() - 0.5).slice(0, Math.min(20, allFilteredDudas.length));
     }
     
     setQuizType(type);
@@ -572,23 +583,25 @@ const App: React.FC = () => {
     setShowExplanation(false);
     setIsDoubtful(false);
     setUserAnswers({});
+    setSelectedErrorTestIndex(null);
     setScreen("quiz");
   };
 
   const resumeQuiz = () => {
-    const { exam, type } = resumeDialog;
-    if (!exam) return;
-    const saved = getQuizProgress(exam.id);
+    const { saveId } = resumeDialog;
+    if (!saveId) return;
+    const saved = getQuizProgress(saveId);
     if (saved) {
       setQuizType(saved.quizType);
       setSelectedExam(saved.selectedExam);
+      setSelectedErrorTestIndex(saved.selectedErrorTestIndex ?? null);
       setQuizQuestions(saved.questions);
       setCurrentQuizIndex(saved.currentIndex);
       setQuizScore(saved.score);
       setUserAnswers(saved.answers);
-      setSelectedAnswer(saved.selectedAnswer);
-      setShowExplanation(saved.showExplanation);
-      setIsDoubtful(saved.isDoubtful);
+      setSelectedAnswer(saved.selectedAnswer || null);
+      setShowExplanation(saved.showExplanation || false);
+      setIsDoubtful(saved.isDoubtful || false);
       setQuizFinished(false);
       setScreen("quiz");
     }
@@ -621,7 +634,7 @@ const App: React.FC = () => {
     const userAnsBase = answer.split(')')[0].trim().toLowerCase();
     const isCorrect = userAnsBase === currentQ.respuesta.toLowerCase();
 
-    const qId = Number(currentQ.id);
+    const qId = currentQ.id;
     
     // Guardar respuesta en la sesión
     setUserAnswers(prev => ({ ...prev, [currentQuizIndex]: answer }));
@@ -644,7 +657,7 @@ const App: React.FC = () => {
         if (hasStreak) {
           setQuizQuestionSuccessStreaks(prev => {
             const currentStreak = (prev[qId] || 0) + 1;
-            if (currentStreak >= 8) {
+            if (currentStreak >= 4) {
               setFailedQuizQuestions(old => old.filter(id => id !== qId));
               const { [qId]: _, ...rest } = prev;
               return rest;
@@ -682,10 +695,7 @@ const App: React.FC = () => {
     setQuizFinished(true);
     
     // Clear saved progress
-    let saveId = null;
-    if (quizType === "random" && selectedExam) saveId = selectedExam.id;
-    else if (quizType === "errors") saveId = "temp-errors";
-    else if (quizType === "dudas") saveId = "temp-dudas";
+    const saveId = selectedExam?.id || (quizType === "errors" && selectedErrorTestIndex !== null ? `temp-errors-${selectedErrorTestIndex}` : `temp-${quizType}`);
     
     if (saveId) {
         clearQuizProgress(saveId);
@@ -1040,55 +1050,55 @@ const App: React.FC = () => {
                </div>
                <div>
                   <h3 className="font-black text-2xl text-slate-800 uppercase tracking-tighter">Hacer Test</h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">{ALL_EXAMS.length + ALL_SIMULACROS.length} Pruebas disponibles</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">{ALL_EXAMS.length + ALL_SIMULACROS.length + EXAMENES_2025.length} Pruebas disponibles</p>
                </div>
             </button>
 
-            <button
-              onClick={() => startQuiz("errors")}
-              disabled={failedQuizQuestions.length < 20}
+             <button
+              onClick={() => setScreen("error_test_selection")}
+              disabled={allFilteredErrors.length === 0}
               className={`group relative overflow-hidden p-8 rounded-[2.5rem] border-2 transition-all text-left flex items-center gap-6 ${
-                failedQuizQuestions.length >= 20 
+                allFilteredErrors.length > 0 
                 ? "bg-white border-slate-100 shadow-md hover:border-amber-600 hover:shadow-xl" 
                 : "bg-slate-50 border-slate-100 opacity-60 grayscale cursor-not-allowed"
               }`}
             >
-               {failedQuizQuestions.length >= 20 && (
+               {allFilteredErrors.length > 0 && (
                 <div className="absolute top-4 right-4 bg-rose-500 text-white w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shadow-lg animate-bounce">
-                  {Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)}
+                  {Math.ceil(allFilteredErrors.length / 20)}
                 </div>
                )}
                <div className={`p-4 rounded-2xl transition-colors ${
-                 failedQuizQuestions.length >= 20 ? "bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
+                 allFilteredErrors.length > 0 ? "bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
                }`}>
                  <RotateCcw className="w-8 h-8" />
                </div>
                <div>
-                  <h3 className={`font-black text-2xl uppercase tracking-tighter ${failedQuizQuestions.length >= 20 ? "text-slate-800" : "text-slate-400"}`}>Test de Errores</h3>
+                  <h3 className={`font-black text-2xl uppercase tracking-tighter ${allFilteredErrors.length > 0 ? "text-slate-800" : "text-slate-400"}`}>Test de Errores</h3>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-                    {failedQuizQuestions.length < 20 ? `Mínimo 20 errores (${failedQuizQuestions.length}/20)` : `${Math.max(0, Math.floor((failedQuizQuestions.length - 20) / 10) + 1)} Repasos pendientes`}
+                    {allFilteredErrors.length === 0 ? `Sin errores acumulados` : `${Math.ceil(allFilteredErrors.length / 20)} Tests disponibles`}
                   </p>
                </div>
             </button>
 
             <button
               onClick={() => startQuiz("dudas")}
-              disabled={blankQuizQuestions.length < 5}
+              disabled={allFilteredDudas.length < 5}
               className={`group relative overflow-hidden p-8 rounded-[2.5rem] border-2 transition-all text-left flex items-center gap-6 ${
-                blankQuizQuestions.length >= 5 
+                allFilteredDudas.length >= 5 
                 ? "bg-white border-slate-100 shadow-md hover:border-violet-600 hover:shadow-xl" 
                 : "bg-slate-50 border-slate-100 opacity-60 grayscale cursor-not-allowed"
               }`}
             >
                <div className={`p-4 rounded-2xl transition-colors ${
-                 blankQuizQuestions.length >= 5 ? "bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
+                 allFilteredDudas.length >= 5 ? "bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white" : "bg-slate-200 text-slate-400"
                }`}>
                  <HelpCircle className="w-8 h-8" />
                </div>
                <div>
-                  <h3 className={`font-black text-2xl uppercase tracking-tighter ${blankQuizQuestions.length >= 5 ? "text-slate-800" : "text-slate-400"}`}>Test de Dudas</h3>
+                  <h3 className={`font-black text-2xl uppercase tracking-tighter ${allFilteredDudas.length >= 5 ? "text-slate-800" : "text-slate-400"}`}>Test de Dudas</h3>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-                    {blankQuizQuestions.length < 5 ? `Mínimo 5 dudas (${blankQuizQuestions.length}/5)` : `${blankQuizQuestions.length} Preguntas sin contestar`}
+                    {allFilteredDudas.length < 5 ? `Mínimo 5 dudas (${allFilteredDudas.length}/5)` : `${allFilteredDudas.length} Preguntas sin contestar`}
                   </p>
                </div>
             </button>
@@ -1323,6 +1333,101 @@ const App: React.FC = () => {
       )
   };
 
+  const renderErrorTestSelection = () => {
+    const testCount = Math.ceil(allFilteredErrors.length / 20);
+    const tests = [];
+    for (let i = 0; i < testCount; i++) {
+      tests.push(allFilteredErrors.slice(i * 20, (i + 1) * 20));
+    }
+
+    return (
+      <div className="max-w-4xl mx-auto py-8 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="flex items-center gap-4 mb-8">
+          <button onClick={() => setScreen("home")} className="bg-white p-3 rounded-2xl border-2 border-slate-200 text-slate-400 hover:text-slate-600 shadow-sm transition-all">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <div>
+            <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">Test de Errores</h2>
+            <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">
+              Selecciona el test que quieres realizar ({allFilteredErrors.length} errores)
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {tests.map((testQs, index) => {
+            const saveId = `temp-errors-${index}`;
+            const saved = getQuizProgress(saveId);
+            const isInProgress = saved && !saved.finished;
+
+            return (
+              <button
+                key={index}
+                onClick={() => {
+                  if (isInProgress) {
+                    setResumeDialog({ visible: true, exam: null, type: "errors", saveId });
+                  } else {
+                    setQuizType("errors");
+                    setQuizQuestions(testQs);
+                    setCurrentQuizIndex(0);
+                    setQuizScore({ correct: 0, total: testQs.length });
+                    setQuizFinished(false);
+                    setSelectedAnswer(null);
+                    setShowExplanation(false);
+                    setIsDoubtful(false);
+                    setUserAnswers({});
+                    setScreen("quiz");
+                    setSelectedErrorTestIndex(index);
+                  }
+                }}
+                className={`group p-6 rounded-[2.5rem] border-2 transition-all text-left flex flex-col gap-4 relative overflow-hidden ${
+                  isInProgress ? "bg-amber-50 border-amber-200" : "bg-white border-slate-100"
+                } hover:border-amber-600 hover:shadow-2xl`}
+              >
+                <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <RotateCcw className="w-24 h-24" />
+                </div>
+                
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${
+                  isInProgress ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-600 group-hover:bg-amber-600 group-hover:text-white"
+                }`}>
+                  <RotateCcw className="w-6 h-6" />
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Test de Errores {index + 1}</h3>
+                    {isInProgress && (
+                      <span className="bg-amber-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest animate-pulse">
+                        En curso
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-bold text-slate-500 leading-relaxed">{testQs.length} {testQs.length === 1 ? 'Pregunta' : 'Preguntas'}</p>
+                </div>
+
+                <div className="flex items-center justify-between mt-auto pt-4 border-t border-slate-50">
+                  <div className={`flex items-center gap-1 transition-colors ${isInProgress ? "text-amber-600" : "text-slate-400 group-hover:text-amber-600"}`}>
+                    <span className="text-[10px] font-black uppercase tracking-widest">{isInProgress ? "Continuar" : "Empezar"}</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+          {tests.length === 0 && (
+            <div className="col-span-full py-12 text-center bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+               <div className="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                  <RotateCcw className="w-8 h-8" />
+               </div>
+               <p className="font-black text-slate-400 uppercase tracking-widest text-sm">No tienes errores acumulados</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderQuiz = () => {
     if (quizFinished) {
       return (
@@ -1370,11 +1475,54 @@ const App: React.FC = () => {
             
             <div className="space-y-3">
               <button
-                onClick={() => startQuiz(quizType, selectedExam || undefined)}
+                onClick={() => {
+                   if (quizType === "errors" && selectedErrorTestIndex !== null) {
+                      setQuizQuestions([...quizQuestions]);
+                      setCurrentQuizIndex(0);
+                      setQuizScore({ correct: 0, total: quizQuestions.length });
+                      setQuizFinished(false);
+                      setSelectedAnswer(null);
+                      setShowExplanation(false);
+                      setIsDoubtful(false);
+                      setUserAnswers({});
+                   } else {
+                      startQuiz(quizType, selectedExam || undefined);
+                   }
+                }}
                 className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-sm tracking-widest hover:bg-indigo-700 transition-all shadow-lg"
               >
-                Reintentar Test
+                {quizType === "errors" ? "Repetir este Test" : "Reintentar Test"}
               </button>
+
+              {quizType === "errors" && selectedErrorTestIndex !== null && (
+                <button
+                  onClick={() => {
+                    const nextIndex = selectedErrorTestIndex + 1;
+                    const testQs = allFilteredErrors.slice(nextIndex * 20, (nextIndex + 1) * 20);
+                    
+                    if (testQs.length > 0) {
+                      setQuizQuestions(testQs);
+                      setCurrentQuizIndex(0);
+                      setQuizScore({ correct: 0, total: testQs.length });
+                      setQuizFinished(false);
+                      setSelectedAnswer(null);
+                      setShowExplanation(false);
+                      setIsDoubtful(false);
+                      setUserAnswers({});
+                      setSelectedErrorTestIndex(nextIndex);
+                    }
+                  }}
+                  disabled={selectedErrorTestIndex >= Math.ceil(allFilteredErrors.length / 20) - 1}
+                  className={`w-full py-4 rounded-2xl font-black uppercase text-sm tracking-widest transition-all ${
+                    selectedErrorTestIndex < Math.ceil(allFilteredErrors.length / 20) - 1
+                    ? "bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg"
+                    : "bg-slate-100 text-slate-300 cursor-not-allowed"
+                  }`}
+                >
+                  Siguiente Test de Errores
+                </button>
+              )}
+
               <button
                 onClick={() => setScreen("home")}
                 className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase text-sm tracking-widest hover:bg-slate-200 transition-all"
@@ -1418,9 +1566,9 @@ const App: React.FC = () => {
                   <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 inline-block">
                     {quizType === "random" ? (selectedExam?.examen || "Test Aleatorio") : "Repaso de Errores"}
                   </span>
-                  {quizQuestionSuccessStreaks[Number(currentQ.id)] !== undefined && (
+                  {quizQuestionSuccessStreaks[currentQ.id] !== undefined && (
                     <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 ml-2 inline-block border border-amber-200">
-                      Maestría: {quizQuestionSuccessStreaks[Number(currentQ.id)]} / 8
+                      Maestría: {quizQuestionSuccessStreaks[currentQ.id]} / 4
                     </span>
                   )}
                   {selectedExam && (
@@ -1552,15 +1700,13 @@ const App: React.FC = () => {
                   <button 
                     onClick={() => {
                         // Force save just in case, though auto-save usually handles it
-                        let saveId = null;
-                        if (quizType === "random" && selectedExam) saveId = selectedExam.id;
-                        else if (quizType === "errors") saveId = "temp-errors";
-                        else if (quizType === "dudas") saveId = "temp-dudas";
+                        const saveId = selectedExam?.id || (quizType === "errors" && selectedErrorTestIndex !== null ? `temp-errors-${selectedErrorTestIndex}` : `temp-${quizType}`);
                         
                         if (saveId) {
                             saveQuizProgress(saveId, {
                                 quizType,
                                 selectedExam,
+                                selectedErrorTestIndex,
                                 questions: quizQuestions,
                                 currentIndex: currentQuizIndex,
                                 score: quizScore,
@@ -1581,10 +1727,7 @@ const App: React.FC = () => {
                   <button 
                     onClick={() => {
                         // Clear the auto-saved progress because user explicitly chose NOT to save
-                        let saveId = null;
-                        if (quizType === "random" && selectedExam) saveId = selectedExam.id;
-                        else if (quizType === "errors") saveId = "temp-errors";
-                        else if (quizType === "dudas") saveId = "temp-dudas";
+                        const saveId = selectedExam?.id || (quizType === "errors" && selectedErrorTestIndex !== null ? `temp-errors-${selectedErrorTestIndex}` : `temp-${quizType}`);
                         
                         if (saveId) {
                             clearQuizProgress(saveId);
@@ -2240,7 +2383,7 @@ const App: React.FC = () => {
                         const newDir = "ida";
                         setDirection(newDir);
                         const targetId = `${selectedBaseId}-${newDir}`;
-                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.split('-')[0] === selectedBaseId) || BUS_ROUTES[0];
                         const stops = route.stops;
                         setSelectedStops([]);
                         setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
@@ -2262,7 +2405,7 @@ const App: React.FC = () => {
                         const newDir = "vuelta";
                         setDirection(newDir);
                         const targetId = `${selectedBaseId}-${newDir}`;
-                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.split('-')[0] === selectedBaseId) || BUS_ROUTES[0];
                         const stops = route.stops;
                         setSelectedStops([]);
                         setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
@@ -2289,7 +2432,7 @@ const App: React.FC = () => {
                       const newId = line.id;
                       setSelectedBaseId(newId);
                       const targetId = `${newId}-${direction}`;
-                      const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(newId)) || BUS_ROUTES[0];
+                      const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.split('-')[0] === newId) || BUS_ROUTES[0];
                       const stops = route.stops;
                       setSelectedStops([]);
                       setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
@@ -2351,7 +2494,7 @@ const App: React.FC = () => {
                 {filteredOptions.length === 0 ? (
                   <div className="col-span-full py-8 text-center text-slate-400 font-bold italic opacity-70">No se encuentran paradas {searchText ? `con "${searchText}"` : ""}</div>
                 ) : (
-                  filteredOptions.slice(0, 3).map((option) => {
+                  filteredOptions.slice(0, 10).map((option) => {
                     const isSingleMatch = filteredOptions.length === 1;
                     return (
                       <button
@@ -2489,7 +2632,7 @@ const App: React.FC = () => {
                         const newDir = "ida";
                         setDirection(newDir);
                         const targetId = `${selectedBaseId}-${newDir}`;
-                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.split('-')[0] === selectedBaseId) || BUS_ROUTES[0];
                         const stops = route.stops;
                         setSelectedStops([]);
                         setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
@@ -2513,7 +2656,7 @@ const App: React.FC = () => {
                         const newDir = "vuelta";
                         setDirection(newDir);
                         const targetId = `${selectedBaseId}-${newDir}`;
-                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.startsWith(selectedBaseId)) || BUS_ROUTES[0];
+                        const route = BUS_ROUTES.find((r) => r.id === targetId) || BUS_ROUTES.find((r) => r.id.split('-')[0] === selectedBaseId) || BUS_ROUTES[0];
                         const stops = route.stops;
                         setSelectedStops([]);
                         setAvailableOptions(stops.map((name, i) => ({ id: `${i}-${name}`, name })));
@@ -2698,6 +2841,7 @@ const App: React.FC = () => {
           if (screen === "quiz_selection") return renderQuizSelection();
           if (screen === "quiz_category_selection") return renderQuizCategorySelection();
           if (screen === "examen_2025_selection") return renderExamen2025Selection();
+          if (screen === "error_test_selection") return renderErrorTestSelection();
           return renderHome();
         })()}
       </main>

@@ -6,4 +6,10 @@ import { Exam } from '../../../types';
 export const ALL_SIMULACROS: Exam[] = [
   simulacro1,
   simulacro2
-];
+].map(exam => ({
+  ...exam,
+  preguntas: exam.preguntas.map(q => ({
+    ...q,
+    id: `${exam.id}-${q.id}`
+  }))
+}));

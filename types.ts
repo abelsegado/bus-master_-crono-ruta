@@ -42,6 +42,6 @@ export interface Exam {
 }
 
 export interface QuizProgress {
-  failedQuestions: number[]; // List of question IDs
+  failedQuestions: (number | string)[]; // List of question IDs
   lastExamDate?: string;
 }

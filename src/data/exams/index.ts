@@ -14,4 +14,10 @@ export const ALL_EXAMS: Exam[] = [
   teoria4,
   teoria5,
   teoria6,
-];
+].map(exam => ({
+  ...exam,
+  preguntas: exam.preguntas.map(q => ({
+    ...q,
+    id: `${exam.id}-${q.id}`
+  }))
+}));

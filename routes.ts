@@ -135,7 +135,7 @@ export const BUS_ROUTES: RouteData[] = [
   {
     "id": "18-ida",
     "name": "Ciudad Jardín - Teatinos",
-    "stops": ["Las Virreinas", "Cmno. de Casabermeja", "Cmno. Casabermeja - Polideportivo", "Emilio Thuiller - Jardín de Málaga", "Emilio Thuiller- Mercado", "Emilio Thuiller", "Emilio Thuiller - La Fuente", "María Tubau", "Lorenza Correa", "Av. Valle Inclán - La Palma", "Av. Simón Bolívar - Centro Comercial", "Blas de Lezo", "Cmno. de Suárez - Blas de Lezo", "Cmno. de Suárez - C/ Alonso Hernández", "Cmno. de Suárez - C/ Venegas", "Cmno. de Suárez - Rotonda", "Av. Carlos Haya - Alcubilla", "Av. Carlos Haya - Teatinos", "Av. Jorge Luis Borges - Orson Welles", "Louis Pasteur - Manuel Domínguez", "Facultad de Derecho", "Facultad de Medicina"]
+    "stops": ["Jane Bowles - Bruckner","Las Virreinas", "Cmno. de Casabermeja", "Cmno. Casabermeja - Polideportivo", "Emilio Thuiller - Jardín de Málaga", "Emilio Thuiller- Mercado", "Emilio Thuiller", "Emilio Thuiller - La Fuente", "María Tubau", "Lorenza Correa", "Av. Valle Inclán - La Palma", "Av. Simón Bolívar - Centro Comercial", "Blas de Lezo", "Cmno. de Suárez - Blas de Lezo", "Cmno. de Suárez - C/ Alonso Hernández", "Cmno. de Suárez - C/ Venegas", "Cmno. de Suárez - Rotonda", "Av. Carlos Haya - Alcubilla", "Av. Carlos Haya - Teatinos", "Av. Jorge Luis Borges - Orson Welles", "Louis Pasteur - Manuel Domínguez", "Facultad de Derecho", "Facultad de Medicina"]
   },
   {
     "id": "18-vuelta",
@@ -255,7 +255,7 @@ export const BUS_ROUTES: RouteData[] = [
   {
     "id": "32-vuelta",
     "name": "Av. Andalucía - Limonar - Mayorazgo",
-    "stops": ["El Mayorazgo - Av. de las Caballerizas", "Av. de las Caballerizas", "Las Espuelas", "Las Espuelas - De la Era", "Arrigo Boito", "Av. Camarón de la Isla - Pza. Arboladura", "Camarón de la Isla - Julián Sesmero", "Camarón de la Isla", "De La Era - P. De Haro Bombarelly", "Sierra de Grazalema - Pinos del Limonar", "Sierra de Grazalema- Sierra del Co", "Sierra de Grazalema", "Carril de Castell", "Paseo del Limonar - Colegio", "Paseo del Limonar", "Paseo de Sancha - Monte Sancha", "Paseo de Sancha - La Caleta", "Av. Príes - Cementerio Inglés", "Paseo de Reding - Plaza de Toros", "Paseo del Parque", "Paseo del Parque - Plaza de la Marina", "Alameda Principal - Norte", "Av. Andalucía"]
+    "stops": ["El Mayorazgo - Av. de las Caballerizas", "Av. de las Caballerizas", "Las Espuelas", "Las Espuelas - Instituto", "Las Espuelas - De la Era", "Arrigo Boito", "Av. Camarón de la Isla - Pza. Arboladura", "Camarón de la Isla - Julián Sesmero", "Camarón de la Isla", "De La Era - P. De Haro Bombarelly", "Sierra de Grazalema - Pinos del Limonar", "Sierra de Grazalema- Sierra del Co", "Sierra de Grazalema", "Carril de Castell", "Paseo del Limonar - Colegio", "Paseo del Limonar", "Paseo de Sancha - Monte Sancha", "Paseo de Sancha - La Caleta", "Av. Príes - Cementerio Inglés", "Paseo de Reding - Plaza de Toros", "Paseo del Parque", "Paseo del Parque - Plaza de la Marina", "Alameda Principal - Norte", "Av. Andalucía"]
   },
   {
     "id": "33-ida",

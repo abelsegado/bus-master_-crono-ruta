@@ -665,7 +665,7 @@ export const testLineas: Exam =   {
     "id": 106,
     "enunciado": "Cuantas líneas tienen parada en \"María Tubau\"",
     "opciones": ["a) 3", "b) 4", "c) 2", "d) 1"],
-    "respuesta": "b"
+    "respuesta": "a"
   },
   {
     "id": 107,
@@ -1299,13 +1299,13 @@ export const testLineas: Exam =   {
   },
   {
     "id": 214,
-    "enunciado": "¿Cuántas pardas tiene la línea 15, sentido vuelta, en Eugenio Gross?",
+    "enunciado": "¿Cuántas paradas tiene la línea 15, sentido vuelta, en Eugenio Gross?",
     "opciones": ["a) 2", "b) 1", "c) 3", "d) Ninguna"],
-    "respuesta": "a"
+    "respuesta": "b"
   },
   {
     "id": 215,
-    "enunciado": "¿Cuántas pardas tiene la línea C8 (78), sentido vuelta?",
+    "enunciado": "¿Cuántas paradas tiene la línea C8 (78), sentido vuelta?",
     "opciones": ["a) 10", "b) 9", "c) 12", "d) 11"],
     "respuesta": "c"
   },
@@ -1624,7 +1624,7 @@ export const testLineas: Exam =   {
   {
     "id": 274,
     "enunciado": "¿Cuál es la cuarta parada de la Línea 7, sentido ida?",
-    "opciones": ["a) Cmno. de la Térmica - Selene", "b) Cmno. de la Térmica - San Patricio", "c) Imperio Argentina - Cmno. de la Térmica", "d) Cmno. de la Térmica – Central"],
+    "opciones": ["a) Cmno. de la Térmica - Selene", "b) Cmno. de la Térmica - San Patricio", "c) Imperio Argentina - Cmno. de la Térmica", "d) Pacifico - Sacaba Beach"],
     "respuesta": "d"
   },
   {
